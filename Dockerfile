@@ -8,7 +8,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Database хадгалах volume
-VOLUME ["/app/data"]
 
 ENV BOT_TOKEN=""
 ENV ADMIN_ID_1=""
