@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  vip_bot:
+    build: .
+    container_name: vip_bot
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ADMIN_ID_1=${ADMIN_ID_1}
+      - ADMIN_ID_2=${ADMIN_ID_2}
+      - VIP_GROUP_ID=${VIP_GROUP_ID}
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
