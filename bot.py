@@ -1,4 +1,4 @@
-    import logging
+                        import logging
 from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import (
@@ -462,7 +462,13 @@ def main():
     scheduler.start()
 
     logger.info("✅ Bot ажиллаж байна...")
-    app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
+    app.run_polling(
+        drop_pending_updates=True,
+        allowed_updates=[
+            "message", "edited_message", "channel_post", "edited_channel_post",
+            "callback_query", "chat_member", "my_chat_member", "chat_join_request"
+        ]
+    )
 
 if __name__ == '__main__':
     main()
