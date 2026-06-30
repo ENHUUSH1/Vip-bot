@@ -1,9 +1,9 @@
-                        import logging
+                                        import logging
 from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters,
-    ContextTypes, ChatMemberHandler
+    ContextTypes, ChatMemberHandler, ChatJoinRequestHandler
 )
 from telegram.error import TelegramError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -214,7 +214,52 @@ async def handle_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
             'username': username_str
         }
 
-# ─── VIP КОМАНДУУД ────────────────────────────────────────────────
+# ─── VIP ГРУППТ JOIN REQUEST ЗӨВШӨӨРӨГДСӨН ───────────────────────
+async def handle_join_request_approved(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Хэрэглэгч join request-ээр орохыг хүсэхэд автоматаар зөвшөөрнө,
+    дараа нь VIP хугацаа асууна."""
+    request = update.chat_join_request
+    if not request:
+        return
+
+    chat_id = request.chat.id
+    if chat_id not in config.VIP_GROUP_IDS:
+        return
+
+    user = request.from_user
+
+    # Хүсэлтийг автоматаар зөвшөөрнө
+    try:
+        await context.bot.approve_chat_join_request(chat_id, user.id)
+    except TelegramError as e:
+        logger.error(f"Join request зөвшөөрөхөд алдаа: {e}")
+        return
+
+    username_str = f"@{user.username}" if user.username else "—"
+    chat_title = request.chat.title or str(chat_id)
+
+    msg = (
+        f"🔔 Шинэ гишүүн нэмэгдлээ\n\n"
+        f"👤 Нэр: {user.first_name} ({username_str})\n"
+        f"🆔 ID: {user.id}\n"
+        f"📺 Суваг: {chat_title}\n\n"
+        f"Энэ хүн хэдэн хоногоор VIP эрхтэй вэ?\n"
+        f"(Тоо бичнэ үү)"
+    )
+
+    for admin_id in config.ADMIN_IDS:
+        try:
+            await context.bot.send_message(chat_id=admin_id, text=msg)
+        except TelegramError as e:
+            logger.error(f"Admin мэдэгдэл алдаа: {e}")
+
+    context.bot_data['pending_vip'] = {
+        'user_id': user.id,
+        'chat_id': chat_id,
+        'username': f"{user.first_name} ({username_str})"
+    }
+
+
 async def add_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
@@ -450,6 +495,7 @@ def main():
     # VIP группт шинэ гишүүн (group болон channel)
     app.add_handler(ChatMemberHandler(handle_chat_member, ChatMemberHandler.CHAT_MEMBER))
     app.add_handler(ChatMemberHandler(handle_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
+    app.add_handler(ChatJoinRequestHandler(handle_join_request_approved))
 
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
