@@ -58,7 +58,8 @@ def init_db():
 
     c.execute('''
         INSERT OR IGNORE INTO settings (key, value)
-        VALUES ('auto_reply',👋 Сайн байна уу! Манай VIP кино сувгад тавтай морил. 🎬
+        VALUES ('auto_reply', 
+        👋 Сайн байна уу! Манай VIP кино сувгад тавтай морил. 🎬
 📺 **Манай VIP сувгууд:**
 1️⃣ 🎬 MZ Монгол Кино
 2️⃣ 🍿 MZ Гадаад Кино
