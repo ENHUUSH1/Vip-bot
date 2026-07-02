@@ -308,4 +308,3 @@ def set_auto_reply(text: str):
     c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('auto_reply', ?)", (text,))
     conn.commit()
     conn.close()
-
