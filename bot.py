@@ -1,7 +1,6 @@
 import logging
 import re
 from datetime import datetime
-import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters,
@@ -13,12 +12,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import database as db
 import config
 
-# Монголын цагийн бүс
-MONGOLIA_TZ = pytz.timezone('Asia/Ulaanbaatar')
-
+# database-ийн get_now-г ашиглах
 def get_now():
-    """Монголын одоогийн цагийг буцаана"""
-    return datetime.now(MONGOLIA_TZ)
+    return db.get_now()
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -32,36 +28,19 @@ def is_admin(user_id: int) -> bool:
 
 
 def parse_time_input(text: str) -> float:
-    """
-    Хугацааны текстийг float (хоногоор) болгон хөрвүүлнэ.
-    Дэмжих формат:
-    - 7        → 7 хоног
-    - 7d       → 7 хоног
-    - 12t      → 12 цаг
-    - 30m      → 30 минут
-    - 7.5      → 7 хоног 12 цаг
-    - 2d 5t    → 2 хоног 5 цаг
-    - 1d 12t 30m → 1 хоног 12 цаг 30 минут
-    - 1.5d     → 1 хоног 12 цаг
-    - d, t, m аль ч дараалалд
-    """
     if not text:
         return 0.0
     
     text = text.lower().strip()
     
-    # Хэрэв зөвхөн тоо байвал → хоног гэж үзнэ
     if re.match(r'^[\d.]+$', text):
         return float(text)
     
     total_days = 0.0
-    
-    # d, t, m гэсэн хэв маягийг хайх (тоо болон нэгжийг ялгах)
     pattern = r'(\d+(?:\.\d+)?)\s*([dtmдтм])'
     matches = re.findall(pattern, text)
     
     if not matches:
-        # Тохирохгүй бол тоо гэж үзэх
         try:
             return float(text)
         except ValueError:
@@ -80,7 +59,6 @@ def parse_time_input(text: str) -> float:
 
 
 def format_time(days: float) -> str:
-    """Хоног/цаг/минутыг уншигдахуйц болгох"""
     if days <= 0:
         return "0 минут"
     
@@ -102,7 +80,6 @@ def format_time(days: float) -> str:
 
 
 async def forward_to_admins(context: ContextTypes.DEFAULT_TYPE, user, header_extra: str = ""):
-    """Хэрэглэгчийн талаарх мэдээллийг бүх админд дамжуулна"""
     username_str = f"@{user.username}" if user.username else "username байхгүй"
     header = f"{user.first_name} ({username_str}) | ID: {user.id}{header_extra}"
     for admin_id in config.ADMIN_IDS:
@@ -125,6 +102,50 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome = db.get_auto_reply()
     await update.message.reply_text(welcome)
     await forward_to_admins(context, user, header_extra="\n[/start дарсан]")
+
+
+# ─── TIMEZONE КОМАНД ────────────────────────────────────────────
+async def cmd_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Цагийн бүсийг харах/тохируулах"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("❌ Энэ команд зөвхөн админд зориулагдсан.")
+        return
+    
+    args = context.args
+    current_offset = db.get_current_timezone()
+    
+    if not args:
+        now = get_now()
+        await update.message.reply_text(
+            f"🕐 **Цагийн бүсийн тохиргоо**\n\n"
+            f"📌 Одоогийн offset: UTC{'+' if current_offset >= 0 else ''}{current_offset}\n"
+            f"🕒 Одоогийн цаг: {now.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"✏️ Өөрчлөхдөө:\n"
+            f"`/timezone [offset]`\n\n"
+            f"Жишээ:\n"
+            f"• `/timezone 8` → UTC+8 (Монгол цаг)\n"
+            f"• `/timezone 0` → UTC\n"
+            f"• `/timezone -5` → UTC-5"
+        )
+        return
+    
+    try:
+        new_offset = int(args[0])
+        if new_offset < -12 or new_offset > 14:
+            await update.message.reply_text("❌ Offset -12-оос 14 хооронд байх ёстой.")
+            return
+        
+        db.set_timezone(new_offset)
+        
+        now = get_now()
+        await update.message.reply_text(
+            f"✅ Цагийн бүс амжилттай өөрчлөгдлөө!\n\n"
+            f"📌 Шинэ offset: UTC{'+' if new_offset >= 0 else ''}{new_offset}\n"
+            f"🕒 Одоогийн цаг: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        logger.info(f"Timezone өөрчлөгдсөн: {new_offset}")
+    except ValueError:
+        await update.message.reply_text("❌ Буруу формат. Жишээ: `/timezone 8`")
 
 
 # ─── ХЭРЭГЛЭГЧИЙН МЕССЕЖ ─────────────────────────────────────────
@@ -170,7 +191,6 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         forward_text = f"{header}\n[Медиа]"
 
-    # Хариулах товчтой хамт админд илгээх
     keyboard = [[
         InlineKeyboardButton(
             "↩️ Хариулах",
@@ -222,7 +242,7 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.error(f"Admin {admin_id} алдаа: {e}")
 
 
-# ─── CALLBACK QUERY (Хариулах товч) ─────────────────────────────
+# ─── CALLBACK QUERY ─────────────────────────────────────────────
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -250,7 +270,7 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
     text = message.text.strip()
 
-    # ── VIP хугацаа асуулт хариулах (pending_vip) ──
+    # ── VIP хугацаа асуулт хариулах ──
     pending = context.bot_data.get('pending_vip')
     if pending:
         days = parse_time_input(text)
@@ -331,7 +351,7 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if text.startswith('/'):
         return
 
-    # ── Reply хийсэн бол тэр хэрэглэгчид хариулна ──
+    # ── Reply хийсэн бол ──
     if message.reply_to_message:
         replied_msg_id = message.reply_to_message.message_id
         target_id = db.get_user_from_message(replied_msg_id, user.id)
@@ -343,7 +363,7 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 await message.reply_text(f"❌ Алдаа: {e}")
             return
 
-    # ── Сүүлд бичсэн хэрэглэгчид хариулна ──
+    # ── Сүүлд бичсэн хэрэглэгчид ──
     last_user = context.bot_data.get('last_user')
     if not last_user:
         await message.reply_text("❌ Хариулах хэрэглэгч байхгүй.")
@@ -356,7 +376,7 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await message.reply_text(f"❌ Алдаа: {e}")
 
 
-# ─── VIP ГРУППТ ШИНЭ ГИШҮҮН (group-д) ──────────────────────────
+# ─── VIP ГРУППТ ШИНЭ ГИШҮҮН ──────────────────────────────────────
 async def handle_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = update.chat_member
     if not result:
@@ -759,11 +779,12 @@ def main():
     app = Application.builder().token(config.BOT_TOKEN).build()
 
     app.add_handler(CommandHandler('start', start))
+    app.add_handler(CommandHandler('timezone', cmd_timezone))
 
     app.add_handler(
         MessageHandler(
             filters.ChatType.PRIVATE & filters.User(config.ADMIN_IDS) & filters.TEXT,
-            handle_admin_message
+
         ),
         group=1
     )
