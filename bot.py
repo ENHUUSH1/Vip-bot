@@ -755,3 +755,60 @@ def main():
     app.add_handler(
         MessageHandler(
             filters.C
+# ─── MAIN ─────────────────────────────────────────────────────────
+def main():
+    db.init_db()
+    app = Application.builder().token(config.BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler('start', start))
+
+    app.add_handler(
+        MessageHandler(
+            filters.ChatType.PRIVATE & filters.User(config.ADMIN_IDS) & filters.TEXT,
+            handle_admin_message
+        ),
+        group=1
+    )
+
+    app.add_handler(CommandHandler('addvip', cmd_add_vip))
+    app.add_handler(CommandHandler('extendvip', cmd_extend_vip))
+    app.add_handler(CommandHandler('removevip', cmd_remove_vip))
+    app.add_handler(CommandHandler('viplist', cmd_vip_list))
+    app.add_handler(CommandHandler('vipinfo', cmd_vip_info))
+    app.add_handler(CommandHandler('stats', cmd_stats))
+    app.add_handler(CommandHandler('setreply', cmd_set_reply))
+    app.add_handler(CommandHandler('viewreply', cmd_view_reply))
+
+    app.add_handler(
+        MessageHandler(~filters.COMMAND & filters.ChatType.PRIVATE, handle_user_message),
+        group=1
+    )
+
+    app.add_handler(CallbackQueryHandler(handle_callback))
+
+    app.add_handler(ChatMemberHandler(handle_chat_member, ChatMemberHandler.CHAT_MEMBER))
+    app.add_handler(ChatMemberHandler(handle_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
+    app.add_handler(ChatJoinRequestHandler(handle_join_request_approved))
+
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(
+        check_vip_expirations,
+        trigger='cron',
+        hour=9,
+        minute=0,
+        kwargs={'context': app}
+    )
+    scheduler.start()
+
+    logger.info("✅ Bot ажиллаж байна...")
+    app.run_polling(
+        drop_pending_updates=True,
+        allowed_updates=[
+            "message", "edited_message", "channel_post", "edited_channel_post",
+            "callback_query", "chat_member", "my_chat_member", "chat_join_request"
+        ]
+    )
+
+
+if __name__ == '__main__':
+    main()
