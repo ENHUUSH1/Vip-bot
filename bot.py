@@ -1,20 +1,14 @@
 import logging
-import re
 from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters,
-    ContextTypes, ChatMemberHandler, ChatJoinRequestHandler,
-    CallbackQueryHandler
+    ContextTypes, ChatMemberHandler, ChatJoinRequestHandler
 )
 from telegram.error import TelegramError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import database as db
 import config
-
-# database-ийн get_now-г ашиглах
-def get_now():
-    return db.get_now()
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -27,128 +21,35 @@ def is_admin(user_id: int) -> bool:
     return user_id in config.ADMIN_IDS
 
 
-def parse_time_input(text: str) -> float:
-    if not text:
-        return 0.0
-    
-    text = text.lower().strip()
-    
-    if re.match(r'^[\d.]+$', text):
-        return float(text)
-    
-    total_days = 0.0
-    pattern = r'(\d+(?:\.\d+)?)\s*([dtmдтм])'
-    matches = re.findall(pattern, text)
-    
-    if not matches:
-        try:
-            return float(text)
-        except ValueError:
-            return 0.0
-    
-    for value, unit in matches:
-        num = float(value)
-        if unit in ['d', 'д']:
-            total_days += num
-        elif unit in ['t', 'т']:
-            total_days += num / 24
-        elif unit in ['m', 'м']:
-            total_days += num / (24 * 60)
-    
-    return total_days
-
-
-def format_time(days: float) -> str:
-    if days <= 0:
-        return "0 минут"
-    
-    total_minutes = int(days * 24 * 60)
-    minutes = total_minutes % 60
-    total_hours = total_minutes // 60
-    hours = total_hours % 24
-    days_int = total_hours // 24
-    
-    parts = []
-    if days_int > 0:
-        parts.append(f"{days_int} хоног")
-    if hours > 0:
-        parts.append(f"{hours} цаг")
-    if minutes > 0:
-        parts.append(f"{minutes} минут")
-    
-    return " ".join(parts) if parts else "0 минут"
-
-
 async def forward_to_admins(context: ContextTypes.DEFAULT_TYPE, user, header_extra: str = ""):
-    username_str = f"@{user.username}" if user.username else "username байхгүй"
+    """Ð¥ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡Ð¸Ð¹Ð½ Ñ‚Ð°Ð»Ð°Ð°Ñ€Ñ… Ð¼ÑÐ´ÑÑÐ»Ð»Ð¸Ð¹Ð³ Ð±Ò¯Ñ… Ð°Ð´Ð¼Ð¸Ð½Ð´ Ð´Ð°Ð¼Ð¶ÑƒÑƒÐ»Ð½Ð° (start Ò¯ÐµÐ´ Ð°ÑˆÐ¸Ð³Ð»Ð°Ð½Ð°)."""
+    username_str = f"@{user.username}" if user.username else "username Ð±Ð°Ð¹Ñ…Ð³Ò¯Ð¹"
     header = f"{user.first_name} ({username_str}) | ID: {user.id}{header_extra}"
     for admin_id in config.ADMIN_IDS:
         try:
             await context.bot.send_message(chat_id=admin_id, text=header)
         except TelegramError as e:
-            logger.error(f"Admin {admin_id} алдаа: {e}")
+            logger.error(f"Admin {admin_id} Ð°Ð»Ð´Ð°Ð°: {e}")
 
 
-# ─── START ────────────────────────────────────────────────────────
+# â”€â”€â”€ START â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if is_admin(user.id):
         return
 
     db.register_user(user.id, user.username, user.first_name)
-    context.user_data['last_message_time'] = get_now()
+    context.user_data['last_message_time'] = datetime.now()
     context.bot_data['last_user'] = user.id
 
     welcome = db.get_auto_reply()
     await update.message.reply_text(welcome)
-    await forward_to_admins(context, user, header_extra="\n[/start дарсан]")
+
+    # Ð¨Ð¸Ð½Ñ Ñ…ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡Ð¸Ð¹Ð½ Ñ‚Ð°Ð»Ð°Ð°Ñ€ Ð°Ð´Ð¼Ð¸Ð½Ð´ Ð¼ÑÐ´ÑÐ³Ð´ÑÐ½Ñ
+    await forward_to_admins(context, user, header_extra="\n[/start Ð´Ð°Ñ€ÑÐ°Ð½]")
 
 
-# ─── TIMEZONE КОМАНД ────────────────────────────────────────────
-async def cmd_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Цагийн бүсийг харах/тохируулах"""
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Энэ команд зөвхөн админд зориулагдсан.")
-        return
-    
-    args = context.args
-    current_offset = db.get_current_timezone()
-    
-    if not args:
-        now = get_now()
-        await update.message.reply_text(
-            f"🕐 **Цагийн бүсийн тохиргоо**\n\n"
-            f"📌 Одоогийн offset: UTC{'+' if current_offset >= 0 else ''}{current_offset}\n"
-            f"🕒 Одоогийн цаг: {now.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-            f"✏️ Өөрчлөхдөө:\n"
-            f"`/timezone [offset]`\n\n"
-            f"Жишээ:\n"
-            f"• `/timezone 8` → UTC+8 (Монгол цаг)\n"
-            f"• `/timezone 0` → UTC\n"
-            f"• `/timezone -5` → UTC-5"
-        )
-        return
-    
-    try:
-        new_offset = int(args[0])
-        if new_offset < -12 or new_offset > 14:
-            await update.message.reply_text("❌ Offset -12-оос 14 хооронд байх ёстой.")
-            return
-        
-        db.set_timezone(new_offset)
-        
-        now = get_now()
-        await update.message.reply_text(
-            f"✅ Цагийн бүс амжилттай өөрчлөгдлөө!\n\n"
-            f"📌 Шинэ offset: UTC{'+' if new_offset >= 0 else ''}{new_offset}\n"
-            f"🕒 Одоогийн цаг: {now.strftime('%Y-%m-%d %H:%M:%S')}"
-        )
-        logger.info(f"Timezone өөрчлөгдсөн: {new_offset}")
-    except ValueError:
-        await update.message.reply_text("❌ Буруу формат. Жишээ: `/timezone 8`")
-
-
-# ─── ХЭРЭГЛЭГЧИЙН МЕССЕЖ ─────────────────────────────────────────
+# â”€â”€â”€ Ð¥Ð­Ð Ð­Ð“Ð›Ð­Ð“Ð§Ð˜Ð™Ð ÐœÐ•Ð¡Ð¡Ð•Ð– â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     message = update.message
@@ -157,7 +58,7 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if is_admin(user.id):
         return
 
-    now = get_now()
+    now = datetime.now()
     last_time = context.user_data.get('last_message_time')
     should_greet = last_time is None or (now - last_time).total_seconds() > 1800
     context.user_data['last_message_time'] = now
@@ -169,95 +70,47 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         try:
             await message.reply_text(welcome)
         except TelegramError as e:
-            logger.error(f"Welcome алдаа: {e}")
+            logger.error(f"Welcome Ð°Ð»Ð´Ð°Ð°: {e}")
 
     context.bot_data['last_user'] = user.id
 
-    username_str = f"@{user.username}" if user.username else "username байхгүй"
+    username_str = f"@{user.username}" if user.username else "username Ð±Ð°Ð¹Ñ…Ð³Ò¯Ð¹"
     header = f"{user.first_name} ({username_str}) | ID: {user.id}"
 
     if message.text:
         forward_text = f"{header}\n{message.text}"
     elif message.photo:
-        forward_text = f"{header}\n[Зураг]"
+        forward_text = f"{header}\n[Ð—ÑƒÑ€Ð°Ð³]"
     elif message.video:
-        forward_text = f"{header}\n[Видео]"
+        forward_text = f"{header}\n[Ð’Ð¸Ð´ÐµÐ¾]"
     elif message.voice:
-        forward_text = f"{header}\n[Дуу]"
+        forward_text = f"{header}\n[Ð”ÑƒÑƒ]"
     elif message.document:
-        forward_text = f"{header}\n[Файл]"
+        forward_text = f"{header}\n[Ð¤Ð°Ð¹Ð»]"
     elif message.sticker:
-        forward_text = f"{header}\n[Стикер]"
+        forward_text = f"{header}\n[Ð¡Ñ‚Ð¸ÐºÐµÑ€]"
     else:
-        forward_text = f"{header}\n[Медиа]"
-
-    keyboard = [[
-        InlineKeyboardButton(
-            "↩️ Хариулах",
-            callback_data=f"reply_{user.id}"
-        )
-    ]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+        forward_text = f"{header}\n[ÐœÐµÐ´Ð¸Ð°]"
 
     for admin_id in config.ADMIN_IDS:
         try:
-            sent = await context.bot.send_message(
-                chat_id=admin_id,
-                text=forward_text,
-                reply_markup=reply_markup
-            )
+            sent = await context.bot.send_message(chat_id=admin_id, text=forward_text)
             db.save_message_map(sent.message_id, user.id, admin_id)
-
             if message.photo:
-                await context.bot.send_photo(
-                    chat_id=admin_id,
-                    photo=message.photo[-1].file_id,
-                    reply_markup=reply_markup
-                )
+                await context.bot.send_photo(chat_id=admin_id, photo=message.photo[-1].file_id)
             elif message.video:
-                await context.bot.send_video(
-                    chat_id=admin_id,
-                    video=message.video.file_id,
-                    reply_markup=reply_markup
-                )
+                await context.bot.send_video(chat_id=admin_id, video=message.video.file_id)
             elif message.voice:
-                await context.bot.send_voice(
-                    chat_id=admin_id,
-                    voice=message.voice.file_id,
-                    reply_markup=reply_markup
-                )
+                await context.bot.send_voice(chat_id=admin_id, voice=message.voice.file_id)
             elif message.document:
-                await context.bot.send_document(
-                    chat_id=admin_id,
-                    document=message.document.file_id,
-                    reply_markup=reply_markup
-                )
+                await context.bot.send_document(chat_id=admin_id, document=message.document.file_id)
             elif message.sticker:
-                await context.bot.send_sticker(
-                    chat_id=admin_id,
-                    sticker=message.sticker.file_id,
-                    reply_markup=reply_markup
-                )
+                await context.bot.send_sticker(chat_id=admin_id, sticker=message.sticker.file_id)
         except TelegramError as e:
-            logger.error(f"Admin {admin_id} алдаа: {e}")
+            logger.error(f"Admin {admin_id} Ð°Ð»Ð´Ð°Ð°: {e}")
 
 
-# ─── CALLBACK QUERY ─────────────────────────────────────────────
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    data = query.data
-    if data.startswith('reply_'):
-        user_id = int(data.split('_')[1])
-        context.user_data['reply_to_user'] = user_id
-        await query.edit_message_reply_markup(reply_markup=None)
-        await query.message.reply_text(
-            f"✏️ {user_id} ID-тай хэрэглэгчид хариулах текстээ бичнэ үү:"
-        )
-
-
-# ─── АДМИНЫ МЕССЕЖ ──────────────────────────────────────────────
+# â”€â”€â”€ ÐÐ”ÐœÐ˜ÐÐ« Ð¥ÐÐ Ð˜Ð£ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     message = update.message
@@ -270,70 +123,37 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
     text = message.text.strip()
 
-    # ── VIP хугацаа асуулт хариулах ──
+    # â”€â”€ VIP Ñ…ÑƒÐ³Ð°Ñ†Ð°Ð° Ð°ÑÑƒÑƒÐ»Ñ‚ Ñ…Ð°Ñ€Ð¸ÑƒÐ»Ð°Ñ… (bot_data Ð´Ð¾Ñ‚Ð¾Ñ€ Ñ…Ð°Ð´Ð³Ð°Ð»ÑÐ°Ð½) â”€â”€
     pending = context.bot_data.get('pending_vip')
-    if pending:
-        days = parse_time_input(text)
-        if days <= 0:
+    if pending and text.lstrip('-').isdigit():
+        try:
+            days = int(text)
+            target_user_id = pending['user_id']
+            chat_id = pending['chat_id']
+            chat_title = pending.get('chat_title', '')
+            username = pending['username']
+            expiry = db.add_vip(target_user_id, chat_id, days, chat_title=chat_title)
+            expiry_str = expiry.strftime('%Y-%m-%d')
             await message.reply_text(
-                "❌ Буруу формат.\n\n"
-                "📌 Зөв бичих жишээ:\n"
-                "• 7         → 7 хоног\n"
-                "• 7d        → 7 хоног\n"
-                "• 12t       → 12 цаг\n"
-                "• 30m       → 30 минут\n"
-                "• 7.5       → 7 хоног 12 цаг\n"
-                "• 2d 5t     → 2 хоног 5 цаг\n"
-                "• 1d 12t 30m → 1 хоног 12 цаг 30 минут\n"
-                "• d, t, m аль ч хослол"
+                f"âœ… VIP Ð½ÑÐ¼ÑÐ³Ð´Ð»ÑÑ\n"
+                f"ðŸ‘¤ {username}\n"
+                f"ðŸ†” {target_user_id}\n"
+                f"ðŸ“º {chat_title or chat_id}\n"
+                f"ðŸ“… Ð”ÑƒÑƒÑÐ°Ñ…: {expiry_str}"
             )
+            try:
+                await context.bot.send_message(
+                    chat_id=target_user_id,
+                    text=f"ðŸŽ‰ Ð¢Ð°Ð½Ñ‹ VIP ÑÑ€Ñ… Ð¸Ð´ÑÐ²Ñ…Ð¶Ð»ÑÑ!\nðŸ“… Ð”ÑƒÑƒÑÐ°Ñ… Ð¾Ð³Ð½Ð¾Ð¾: {expiry_str}"
+                )
+            except TelegramError:
+                pass
+            context.bot_data.pop('pending_vip', None)
             return
-        
-        if days > 365:
-            await message.reply_text("❌ 365 хоногоос их хугацаа оруулах боломжгүй.")
-            return
-            
-        target_user_id = pending['user_id']
-        chat_id = pending['chat_id']
-        chat_title = pending.get('chat_title', '')
-        username = pending.get('username', str(target_user_id))
-        
-        expiry = db.add_vip(target_user_id, chat_id, days, chat_title=chat_title)
-        expiry_str = expiry.strftime('%Y-%m-%d %H:%M')
-        time_str = format_time(days)
-        
-        await message.reply_text(
-            f"✅ VIP нэмэгдлээ\n"
-            f"👤 {username}\n"
-            f"🆔 {target_user_id}\n"
-            f"📺 {chat_title or chat_id}\n"
-            f"⏱ {time_str}\n"
-            f"📅 Дуусах: {expiry_str}"
-        )
-        try:
-            await context.bot.send_message(
-                chat_id=target_user_id,
-                text=f"🎉 Таны VIP эрх идэвхжлээ!\n⏱ {time_str}\n📅 Дуусах огноо: {expiry_str}"
-            )
-        except TelegramError:
-            pass
-        context.bot_data.pop('pending_vip', None)
-        return
+        except ValueError:
+            pass  # Ñ‚Ð¾Ð¾ Ð±Ð¸Ñˆ Ð±Ð¾Ð» Ð´Ð¾Ð¾Ñˆ Ð½ÑŒ Ò¯Ñ€Ð³ÑÐ»Ð¶Ð¸Ð»Ð½Ñ (Ó©Ó©Ñ€ ÐºÐ¾Ð¼Ð°Ð½Ð´ Ð³ÑÐ¶ Ò¯Ð·Ð½Ñ)
 
-    # ── Reply товч дарсан хэрэглэгчид хариулах ──
-    reply_to_user = context.user_data.get('reply_to_user')
-    if reply_to_user:
-        try:
-            await context.bot.send_message(chat_id=reply_to_user, text=text)
-            await message.reply_text(f"✅ {reply_to_user}-д хариу илгээгдлээ.")
-            context.user_data.pop('reply_to_user', None)
-            return
-        except TelegramError as e:
-            await message.reply_text(f"❌ Алдаа: {e}")
-            context.user_data.pop('reply_to_user', None)
-            return
-
-    # ── /r ID текст ──
+    # â”€â”€ /r ID Ñ‚ÐµÐºÑÑ‚ â”€â”€
     if text.startswith('/r '):
         parts = text.split(' ', 2)
         if len(parts) >= 3:
@@ -341,42 +161,40 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 target_id = int(parts[1])
                 reply_text = parts[2]
                 await context.bot.send_message(chat_id=target_id, text=reply_text)
-                await message.reply_text(f"✅ {target_id}-д илгээгдлээ.")
+                await message.reply_text(f"âœ… {target_id}-Ð´ Ð¸Ð»Ð³ÑÑÐ³Ð´Ð»ÑÑ.")
             except Exception as e:
-                await message.reply_text(f"❌ Алдаа: {e}")
+                await message.reply_text(f"âŒ ÐÐ»Ð´Ð°Ð°: {e}")
         else:
-            await message.reply_text("📌 Хэрэглээ: /r [user_id] [текст]")
+            await message.reply_text("ðŸ“Œ Ð¥ÑÑ€ÑÐ³Ð»ÑÑ: /r [user_id] [Ñ‚ÐµÐºÑÑ‚]")
         return
 
     if text.startswith('/'):
         return
 
-    # ── Reply хийсэн бол ──
+    # â”€â”€ Reply Ñ…Ð¸Ð¹ÑÑÐ½ Ð±Ð¾Ð» Ñ‚ÑÑ€ Ñ…ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡Ð¸Ð´ Ñ…Ð°Ñ€Ð¸ÑƒÐ»Ð½Ð° â”€â”€
     if message.reply_to_message:
         replied_msg_id = message.reply_to_message.message_id
         target_id = db.get_user_from_message(replied_msg_id, user.id)
         if target_id:
             try:
                 await context.bot.send_message(chat_id=target_id, text=text)
-                await message.reply_text(f"✅ {target_id}-д хариу илгээгдлээ.")
             except TelegramError as e:
-                await message.reply_text(f"❌ Алдаа: {e}")
+                await message.reply_text(f"âŒ ÐÐ»Ð´Ð°Ð°: {e}")
             return
 
-    # ── Сүүлд бичсэн хэрэглэгчид ──
+    # â”€â”€ Ð¡Ò¯Ò¯Ð»Ð´ Ð±Ð¸Ñ‡ÑÑÐ½ Ñ…ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡Ð¸Ð´ Ñ…Ð°Ñ€Ð¸ÑƒÐ»Ð½Ð° â”€â”€
     last_user = context.bot_data.get('last_user')
     if not last_user:
-        await message.reply_text("❌ Хариулах хэрэглэгч байхгүй.")
+        await message.reply_text("âŒ Ð¥Ð°Ñ€Ð¸ÑƒÐ»Ð°Ñ… Ñ…ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡ Ð±Ð°Ð¹Ñ…Ð³Ò¯Ð¹.")
         return
 
     try:
         await context.bot.send_message(chat_id=last_user, text=text)
-        await message.reply_text(f"✅ {last_user}-д хариу илгээгдлээ.")
     except TelegramError as e:
-        await message.reply_text(f"❌ Алдаа: {e}")
+        await message.reply_text(f"âŒ ÐÐ»Ð´Ð°Ð°: {e}")
 
 
-# ─── VIP ГРУППТ ШИНЭ ГИШҮҮН ──────────────────────────────────────
+# â”€â”€â”€ VIP Ð“Ð Ð£ÐŸÐŸÐ¢ Ð¨Ð˜ÐÐ­ Ð“Ð˜Ð¨Ò®Ò®Ð (group-Ð´ Ð» Ð°Ð¶Ð¸Ð»Ð»Ð°Ð½Ð°) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async def handle_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = update.chat_member
     if not result:
@@ -390,47 +208,37 @@ async def handle_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
     new_status = result.new_chat_member.status
     new_member = result.new_chat_member.user
 
-    if new_member.id == context.bot.id:
-        return
-
     if old_status in ['left', 'kicked'] and new_status in ['member', 'administrator']:
-        username_str = f"@{new_member.username}" if new_member.username else "—"
+        username_str = f"@{new_member.username}" if new_member.username else "â€”"
         chat_title = result.chat.title or str(chat_id)
 
         msg = (
-            f"🔔 Шинэ гишүүн нэмэгдлээ\n\n"
-            f"👤 Нэр: {new_member.first_name} ({username_str})\n"
-            f"🆔 ID: {new_member.id}\n"
-            f"📺 Суваг: {chat_title}\n\n"
-            f"Энэ хүн хэдэн хугацаагаар VIP эрхтэй вэ?\n"
-            f"📌 Жишээ:\n"
-            f"• 7         → 7 хоног\n"
-            f"• 7d        → 7 хоног\n"
-            f"• 12t       → 12 цаг\n"
-            f"• 30m       → 30 минут\n"
-            f"• 7.5       → 7 хоног 12 цаг\n"
-            f"• 2d 5t     → 2 хоног 5 цаг\n"
-            f"• 1d 12t 30m → 1 хоног 12 цаг 30 минут\n\n"
-            f"Дуртай тоогоо бичнэ үү:"
+            f"ðŸ”” Ð¨Ð¸Ð½Ñ Ð³Ð¸ÑˆÒ¯Ò¯Ð½ Ð½ÑÐ¼ÑÐ³Ð´Ð»ÑÑ\n\n"
+            f"ðŸ‘¤ ÐÑÑ€: {new_member.first_name} ({username_str})\n"
+            f"ðŸ†” ID: {new_member.id}\n"
+            f"ðŸ“º Ð¡ÑƒÐ²Ð°Ð³: {chat_title}\n\n"
+            f"Ð­Ð½Ñ Ñ…Ò¯Ð½ Ñ…ÑÐ´ÑÐ½ Ñ…Ð¾Ð½Ð¾Ð³Ð¾Ð¾Ñ€ VIP ÑÑ€Ñ…Ñ‚ÑÐ¹ Ð²Ñ?\n"
+            f"(Ð¢Ð¾Ð¾ Ð±Ð¸Ñ‡Ð½Ñ Ò¯Ò¯)"
         )
 
         for admin_id in config.ADMIN_IDS:
             try:
                 await context.bot.send_message(chat_id=admin_id, text=msg)
             except TelegramError as e:
-                logger.error(f"Admin мэдэгдэл алдаа: {e}")
+                logger.error(f"Admin Ð¼ÑÐ´ÑÐ³Ð´ÑÐ» Ð°Ð»Ð´Ð°Ð°: {e}")
 
         context.bot_data['pending_vip'] = {
             'user_id': new_member.id,
             'chat_id': chat_id,
             'chat_title': chat_title,
-            'username': f"{new_member.first_name} ({username_str})",
-            'timestamp': get_now().isoformat()
+            'username': f"{new_member.first_name} ({username_str})"
         }
 
 
-# ─── VIP CHANNEL JOIN REQUEST ──────────────────────────────────
+# â”€â”€â”€ VIP Ð“Ð Ð£ÐŸÐŸÐ¢ JOIN REQUEST (channel-Ð´ Ð°ÑˆÐ¸Ð³Ð»Ð°Ð½Ð°) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async def handle_join_request_approved(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ð¥ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡ join request-ÑÑÑ€ Ð¾Ñ€Ð¾Ñ…Ñ‹Ð³ Ñ…Ò¯ÑÑÑ…ÑÐ´ Ð°Ð²Ñ‚Ð¾Ð¼Ð°Ñ‚Ð°Ð°Ñ€ Ð·Ó©Ð²ÑˆÓ©Ó©Ñ€Ð½Ó©,
+    Ð´Ð°Ñ€Ð°Ð° Ð½ÑŒ VIP Ñ…ÑƒÐ³Ð°Ñ†Ð°Ð° Ð°ÑÑƒÑƒÐ½Ð°."""
     request = update.chat_join_request
     if not request:
         return
@@ -444,74 +252,49 @@ async def handle_join_request_approved(update: Update, context: ContextTypes.DEF
     try:
         await context.bot.approve_chat_join_request(chat_id, user.id)
     except TelegramError as e:
-        logger.error(f"Join request зөвшөөрөхөд алдаа: {e}")
+        logger.error(f"Join request Ð·Ó©Ð²ÑˆÓ©Ó©Ñ€Ó©Ñ…Ó©Ð´ Ð°Ð»Ð´Ð°Ð°: {e}")
         return
 
-    username_str = f"@{user.username}" if user.username else "—"
+    username_str = f"@{user.username}" if user.username else "â€”"
     chat_title = request.chat.title or str(chat_id)
 
     msg = (
-        f"🔔 Шинэ гишүүн нэмэгдлээ\n\n"
-        f"👤 Нэр: {user.first_name} ({username_str})\n"
-        f"🆔 ID: {user.id}\n"
-        f"📺 Суваг: {chat_title}\n\n"
-        f"Энэ хүн хэдэн хугацаагаар VIP эрхтэй вэ?\n"
-        f"📌 Жишээ:\n"
-        f"• 7         → 7 хоног\n"
-        f"• 7d        → 7 хоног\n"
-        f"• 12t       → 12 цаг\n"
-        f"• 30m       → 30 минут\n"
-        f"• 7.5       → 7 хоног 12 цаг\n"
-        f"• 2d 5t     → 2 хоног 5 цаг\n"
-        f"• 1d 12t 30m → 1 хоног 12 цаг 30 минут\n\n"
-        f"Дуртай тоогоо бичнэ үү:"
+        f"ðŸ”” Ð¨Ð¸Ð½Ñ Ð³Ð¸ÑˆÒ¯Ò¯Ð½ Ð½ÑÐ¼ÑÐ³Ð´Ð»ÑÑ\n\n"
+        f"ðŸ‘¤ ÐÑÑ€: {user.first_name} ({username_str})\n"
+        f"ðŸ†” ID: {user.id}\n"
+        f"ðŸ“º Ð¡ÑƒÐ²Ð°Ð³: {chat_title}\n\n"
+        f"Ð­Ð½Ñ Ñ…Ò¯Ð½ Ñ…ÑÐ´ÑÐ½ Ñ…Ð¾Ð½Ð¾Ð³Ð¾Ð¾Ñ€ VIP ÑÑ€Ñ…Ñ‚ÑÐ¹ Ð²Ñ?\n"
+        f"(Ð¢Ð¾Ð¾ Ð±Ð¸Ñ‡Ð½Ñ Ò¯Ò¯)"
     )
 
     for admin_id in config.ADMIN_IDS:
         try:
             await context.bot.send_message(chat_id=admin_id, text=msg)
         except TelegramError as e:
-            logger.error(f"Admin мэдэгдэл алдаа: {e}")
+            logger.error(f"Admin Ð¼ÑÐ´ÑÐ³Ð´ÑÐ» Ð°Ð»Ð´Ð°Ð°: {e}")
 
     context.bot_data['pending_vip'] = {
         'user_id': user.id,
         'chat_id': chat_id,
         'chat_title': chat_title,
-        'username': f"{user.first_name} ({username_str})",
-        'timestamp': get_now().isoformat()
+        'username': f"{user.first_name} ({username_str})"
     }
 
 
-# ─── VIP КОМАНДУУД ──────────────────────────────────────────────
+# â”€â”€â”€ VIP ÐšÐžÐœÐÐÐ”Ð£Ð£Ð” â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async def cmd_add_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
     args = context.args
     if len(args) != 3:
-        await update.message.reply_text(
-            "📌 Хэрэглээ: /addvip [user_id] [chat_id] [хугацаа]\n\n"
-            "Жишээ:\n"
-            "• /addvip 123 -100123 7       → 7 хоног\n"
-            "• /addvip 123 -100123 7d      → 7 хоног\n"
-            "• /addvip 123 -100123 12t     → 12 цаг\n"
-            "• /addvip 123 -100123 30m     → 30 минут\n"
-            "• /addvip 123 -100123 7.5     → 7 хоног 12 цаг\n"
-            "• /addvip 123 -100123 2d 5t   → 2 хоног 5 цаг\n"
-            "• /addvip 123 -100123 1d 12t 30m → 1 хоног 12 цаг 30 минут"
-        )
+        await update.message.reply_text("ðŸ“Œ Ð¥ÑÑ€ÑÐ³Ð»ÑÑ: /addvip [user_id] [chat_id] [Ñ…Ð¾Ð½Ð¾Ð³]")
         return
     try:
         user_id = int(args[0])
         chat_id = int(args[1])
-        days = parse_time_input(args[2])
-        if days <= 0:
-            await update.message.reply_text("❌ Буруу формат.")
-            return
-        if days > 365:
-            await update.message.reply_text("❌ 365 хоногоос их хугацаа оруулах боломжгүй.")
-            return
+        days = int(args[2])
     except ValueError:
-        await update.message.reply_text("❌ Буруу формат.")
+        await update.message.reply_text("âŒ Ð‘ÑƒÑ€ÑƒÑƒ Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚.")
         return
 
     chat_title = ""
@@ -522,20 +305,19 @@ async def cmd_add_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     expiry = db.add_vip(user_id, chat_id, days, chat_title=chat_title)
-    expiry_str = expiry.strftime('%Y-%m-%d %H:%M')
-    time_str = format_time(days)
+    expiry_str = expiry.strftime('%Y-%m-%d')
     user_info = db.get_user_info(user_id)
     name = user_info['first_name'] if user_info and user_info['first_name'] else str(user_id)
-    username = f"@{user_info['username']}" if user_info and user_info['username'] else "—"
+    username = f"@{user_info['username']}" if user_info and user_info['username'] else "â€”"
 
     await update.message.reply_text(
-        f"✅ VIP нэмэгдлээ\n👤 {name} ({username})\n🆔 {user_id}\n"
-        f"📺 {chat_title or chat_id}\n⏱ {time_str}\n📅 Дуусах: {expiry_str}"
+        f"âœ… VIP Ð½ÑÐ¼ÑÐ³Ð´Ð»ÑÑ\nðŸ‘¤ {name} ({username})\nðŸ†” {user_id}\n"
+        f"ðŸ“º {chat_title or chat_id}\nðŸ“… Ð”ÑƒÑƒÑÐ°Ñ…: {expiry_str}"
     )
     try:
         await context.bot.send_message(
             chat_id=user_id,
-            text=f"🎉 Таны VIP эрх идэвхжлээ!\n⏱ {time_str}\n📅 Дуусах огноо: {expiry_str}"
+            text=f"ðŸŽ‰ Ð¢Ð°Ð½Ñ‹ VIP ÑÑ€Ñ… Ð¸Ð´ÑÐ²Ñ…Ð¶Ð»ÑÑ!\nðŸ“… Ð”ÑƒÑƒÑÐ°Ñ… Ð¾Ð³Ð½Ð¾Ð¾: {expiry_str}"
         )
     except TelegramError:
         pass
@@ -546,41 +328,28 @@ async def cmd_extend_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     args = context.args
     if len(args) != 3:
-        await update.message.reply_text(
-            "📌 Хэрэглээ: /extendvip [user_id] [chat_id] [хугацаа]\n\n"
-            "Жишээ:\n"
-            "• /extendvip 123 -100123 3d   → 3 хоног\n"
-            "• /extendvip 123 -100123 6t   → 6 цаг\n"
-            "• /extendvip 123 -100123 1d 12t → 1 хоног 12 цаг"
-        )
+        await update.message.reply_text("ðŸ“Œ Ð¥ÑÑ€ÑÐ³Ð»ÑÑ: /extendvip [user_id] [chat_id] [Ñ…Ð¾Ð½Ð¾Ð³]")
         return
     try:
         user_id = int(args[0])
         chat_id = int(args[1])
-        days = parse_time_input(args[2])
-        if days <= 0:
-            await update.message.reply_text("❌ Буруу формат.")
-            return
-        if days > 365:
-            await update.message.reply_text("❌ 365 хоногоос их хугацаа оруулах боломжгүй.")
-            return
+        days = int(args[2])
     except ValueError:
-        await update.message.reply_text("❌ Буруу формат.")
+        await update.message.reply_text("âŒ Ð‘ÑƒÑ€ÑƒÑƒ Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚.")
         return
     result = db.extend_vip(user_id, chat_id, days)
     if result:
-        expiry_str = result.strftime('%Y-%m-%d %H:%M')
-        time_str = format_time(days)
-        await update.message.reply_text(f"✅ VIP сунгагдлаа\n⏱ {time_str}\n📅 Шинэ дуусах: {expiry_str}")
+        expiry_str = result.strftime('%Y-%m-%d')
+        await update.message.reply_text(f"âœ… VIP ÑÑƒÐ½Ð³Ð°Ð³Ð´Ð»Ð°Ð°\nðŸ“… Ð¨Ð¸Ð½Ñ Ð´ÑƒÑƒÑÐ°Ñ…: {expiry_str}")
         try:
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"🎉 VIP сунгагдлаа!\n⏱ {time_str}\n📅 Шинэ дуусах огноо: {expiry_str}"
+                text=f"ðŸŽ‰ VIP ÑÑƒÐ½Ð³Ð°Ð³Ð´Ð»Ð°Ð°!\nðŸ“… Ð¨Ð¸Ð½Ñ Ð´ÑƒÑƒÑÐ°Ñ… Ð¾Ð³Ð½Ð¾Ð¾: {expiry_str}"
             )
         except TelegramError:
             pass
     else:
-        await update.message.reply_text("❌ Энэ хэрэглэгч тухайн channel дээр VIP биш байна.")
+        await update.message.reply_text("âŒ Ð­Ð½Ñ Ñ…ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡ Ñ‚ÑƒÑ…Ð°Ð¹Ð½ channel Ð´ÑÑÑ€ VIP Ð±Ð¸Ñˆ Ð±Ð°Ð¹Ð½Ð°.")
 
 
 async def cmd_remove_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -588,32 +357,32 @@ async def cmd_remove_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     args = context.args
     if len(args) not in (1, 2):
-        await update.message.reply_text("📌 Хэрэглээ: /removevip [user_id] [chat_id]\n(chat_id өгөхгүй бол БҮХ channel-аас хасна)")
+        await update.message.reply_text("ðŸ“Œ Ð¥ÑÑ€ÑÐ³Ð»ÑÑ: /removevip [user_id] [chat_id]\n(chat_id Ó©Ð³Ó©Ñ…Ð³Ò¯Ð¹ Ð±Ð¾Ð» Ð‘Ò®Ð¥ channel-Ð°Ð°Ñ Ñ…Ð°ÑÐ½Ð°)")
         return
     try:
         user_id = int(args[0])
     except ValueError:
-        await update.message.reply_text("❌ Буруу формат.")
+        await update.message.reply_text("âŒ Ð‘ÑƒÑ€ÑƒÑƒ Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚.")
         return
 
     if len(args) == 2:
         try:
             chat_id = int(args[1])
         except ValueError:
-            await update.message.reply_text("❌ Буруу формат.")
+            await update.message.reply_text("âŒ Ð‘ÑƒÑ€ÑƒÑƒ Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚.")
             return
         success = db.remove_vip(user_id, chat_id)
         chat_ids = [chat_id] if success else []
         if not success:
-            await update.message.reply_text("❌ Хэрэглэгч энэ channel дээр VIP биш байна.")
+            await update.message.reply_text("âŒ Ð¥ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡ ÑÐ½Ñ channel Ð´ÑÑÑ€ VIP Ð±Ð¸Ñˆ Ð±Ð°Ð¹Ð½Ð°.")
             return
     else:
         chat_ids = db.remove_vip_all(user_id)
         if not chat_ids:
-            await update.message.reply_text("❌ Хэрэглэгч VIP биш байна.")
+            await update.message.reply_text("âŒ Ð¥ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡ VIP Ð±Ð¸Ñˆ Ð±Ð°Ð¹Ð½Ð°.")
             return
 
-    await update.message.reply_text(f"✅ {user_id}-ийн VIP цуцлагдлаа.")
+    await update.message.reply_text(f"âœ… {user_id}-Ð¸Ð¹Ð½ VIP Ñ†ÑƒÑ†Ð»Ð°Ð³Ð´Ð»Ð°Ð°.")
     for gid in chat_ids:
         try:
             await context.bot.ban_chat_member(gid, user_id)
@@ -621,7 +390,7 @@ async def cmd_remove_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except TelegramError:
             pass
     try:
-        await context.bot.send_message(chat_id=user_id, text="❌ Таны VIP эрх цуцлагдлаа.")
+        await context.bot.send_message(chat_id=user_id, text="âŒ Ð¢Ð°Ð½Ñ‹ VIP ÑÑ€Ñ… Ñ†ÑƒÑ†Ð»Ð°Ð³Ð´Ð»Ð°Ð°.")
     except TelegramError:
         pass
 
@@ -631,17 +400,15 @@ async def cmd_vip_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     vips = db.get_all_vips()
     if not vips:
-        await update.message.reply_text("Идэвхтэй VIP байхгүй.")
+        await update.message.reply_text("Ð˜Ð´ÑÐ²Ñ…Ñ‚ÑÐ¹ VIP Ð±Ð°Ð¹Ñ…Ð³Ò¯Ð¹.")
         return
-    lines = ["📋 VIP хэрэглэгчид:"]
+    lines = ["VIP Ñ…ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡Ð¸Ð´:"]
     for v in vips:
-        name = v['first_name'] or '—'
-        username = f"@{v['username']}" if v['username'] else "—"
-        expiry = v['vip_expiry'][:16] if v['vip_expiry'] else "—"
+        name = v['first_name'] or 'â€”'
+        username = f"@{v['username']}" if v['username'] else "â€”"
+        expiry = v['vip_expiry'][:10] if v['vip_expiry'] else "â€”"
         chat_title = v['chat_title'] or str(v['chat_id'])
         lines.append(f"{name} ({username}) | {v['user_id']} | {chat_title} | {expiry}")
-    if len(lines) > 50:
-        lines = lines[:50] + ["... болон бусад"]
     await update.message.reply_text("\n".join(lines))
 
 
@@ -650,34 +417,33 @@ async def cmd_vip_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     args = context.args
     if len(args) != 1:
-        await update.message.reply_text("📌 Хэрэглээ: /vipinfo [user_id]")
+        await update.message.reply_text("ðŸ“Œ Ð¥ÑÑ€ÑÐ³Ð»ÑÑ: /vipinfo [user_id]")
         return
     try:
         user_id = int(args[0])
     except ValueError:
-        await update.message.reply_text("❌ Буруу формат.")
+        await update.message.reply_text("âŒ Ð‘ÑƒÑ€ÑƒÑƒ Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚.")
         return
     user = db.get_user_info(user_id)
     if not user:
-        await update.message.reply_text("❌ Хэрэглэгч олдсонгүй.")
+        await update.message.reply_text("âŒ Ð¥ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡ Ð¾Ð»Ð´ÑÐ¾Ð½Ð³Ò¯Ð¹.")
         return
-    username_str = f"@{user['username']}" if user['username'] else "—"
+    username_str = f"@{user['username']}" if user['username'] else "â€”"
 
     memberships = db.get_vip_memberships(user_id)
     lines = [
-        f"🆔 ID: {user['user_id']}",
-        f"👤 Нэр: {user['first_name'] or '—'}",
-        f"📝 Username: {username_str}",
+        f"ID: {user['user_id']}",
+        f"ÐÑÑ€: {user['first_name'] or 'â€”'}",
+        f"Username: {username_str}",
     ]
     if not memberships:
-        lines.append("❌ VIP: Идэвхгүй (ямар ч channel дээр байхгүй)")
+        lines.append("VIP: Ð˜Ð´ÑÐ²Ñ…Ð³Ò¯Ð¹ (ÑÐ¼Ð°Ñ€ Ñ‡ channel Ð´ÑÑÑ€ Ð±Ð°Ð¹Ñ…Ð³Ò¯Ð¹)")
     else:
-        lines.append("📺 VIP channel-ууд:")
+        lines.append("VIP channel-ÑƒÑƒÐ´:")
         for m in memberships:
             chat_title = m['chat_title'] or str(m['chat_id'])
-            expiry = m['vip_expiry'][:16] if m['vip_expiry'] else "—"
-            started = m['vip_started'][:16] if m['vip_started'] else "—"
-            lines.append(f"  • {chat_title}\n    📅 Эхэлсэн: {started}\n    ⏰ Дуусах: {expiry}")
+            expiry = m['vip_expiry'][:10] if m['vip_expiry'] else "â€”"
+            lines.append(f"  â€¢ {chat_title}: {expiry}")
     await update.message.reply_text("\n".join(lines))
 
 
@@ -686,56 +452,52 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     s = db.get_stats()
     await update.message.reply_text(
-        f"📊 Статистик:\n"
-        f"👥 Нийт хэрэглэгч: {s['total_users']}\n"
-        f"📋 Идэвхтэй VIP бичлэг: {s['total_vip']}\n"
-        f"👤 Идэвхтэй VIP хэрэглэгч: {s['total_vip_users']}"
+        f"ÐÐ¸Ð¹Ñ‚ Ñ…ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡: {s['total_users']}\n"
+        f"Ð˜Ð´ÑÐ²Ñ…Ñ‚ÑÐ¹ VIP Ð±Ð¸Ñ‡Ð»ÑÐ³: {s['total_vip']}\n"
+        f"Ð˜Ð´ÑÐ²Ñ…Ñ‚ÑÐ¹ VIP Ñ…ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡: {s['total_vip_users']}"
     )
 
 
-async def cmd_set_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def set_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
     if not context.args:
         current = db.get_auto_reply()
         await update.message.reply_text(
-            f"📝 Одоогийн автомат хариулт:\n{current}\n\n✏️ Өөрчлөхдөө:\n/setreply [шинэ текст]"
+            f"ÐžÐ´Ð¾Ð¾Ð³Ð¸Ð¹Ð½ Ð°Ð²Ñ‚Ð¾Ð¼Ð°Ñ‚ Ñ…Ð°Ñ€Ð¸ÑƒÐ»Ñ‚:\n{current}\n\nÓ¨Ó©Ñ€Ñ‡Ð»Ó©Ñ…Ð´Ó©Ó©:\n/setreply [ÑˆÐ¸Ð½Ñ Ñ‚ÐµÐºÑÑ‚]"
         )
         return
     new_text = ' '.join(context.args)
     db.set_auto_reply(new_text)
-    await update.message.reply_text(f"✅ Автомат хариулт шинэчлэгдлээ:\n{new_text}")
+    await update.message.reply_text(f"âœ… ÐÐ²Ñ‚Ð¾Ð¼Ð°Ñ‚ Ñ…Ð°Ñ€Ð¸ÑƒÐ»Ñ‚ ÑˆÐ¸Ð½ÑÑ‡Ð»ÑÐ³Ð´Ð»ÑÑ:\n{new_text}")
 
 
-async def cmd_view_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def view_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
     current = db.get_auto_reply()
-    await update.message.reply_text(f"📝 Автомат хариулт:\n{current}")
+    await update.message.reply_text(f"ÐÐ²Ñ‚Ð¾Ð¼Ð°Ñ‚ Ñ…Ð°Ñ€Ð¸ÑƒÐ»Ñ‚:\n{current}")
 
 
-# ─── SCHEDULER ────────────────────────────────────────────────────
+# â”€â”€â”€ SCHEDULER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async def check_vip_expirations(context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
-    logger.info("VIP хугацаа шалгаж байна...")
 
     for user in db.get_expiring_soon(3):
         try:
             await bot.send_message(
                 chat_id=user['user_id'],
-                text="⚠️ Таны VIP эрх 3 хоногийн дотор дуусна!\nСунгуулахыг хүсвэл бидэнтэй холбогдоно уу."
+                text="âš ï¸ Ð¢Ð°Ð½Ñ‹ VIP ÑÑ€Ñ… 3 Ñ…Ð¾Ð½Ð¾Ð³Ð¸Ð¹Ð½ Ð´Ð¾Ñ‚Ð¾Ñ€ Ð´ÑƒÑƒÑÐ½Ð°!\nÐ¡ÑƒÐ½Ð³ÑƒÑƒÐ»Ð°Ñ…Ñ‹Ð³ Ñ…Ò¯ÑÐ²ÑÐ» Ð±Ð¸Ð´ÑÐ½Ñ‚ÑÐ¹ Ñ…Ð¾Ð»Ð±Ð¾Ð³Ð´Ð¾Ð½Ð¾ ÑƒÑƒ."
             )
-            logger.info(f"3 хоногийн сануулга илгээсэн: {user['user_id']}")
         except TelegramError:
             pass
 
-    for user in db.get_expiring_soon(1):
+    for user in db.get_expiring_soon(2):
         try:
             await bot.send_message(
                 chat_id=user['user_id'],
-                text="⚠️⚠️ Таны VIP эрх МАРГААШ дуусна!\nСунгуулахыг хүсвэл яараарай!"
+                text="âš ï¸ Ð¢Ð°Ð½Ñ‹ VIP ÑÑ€Ñ… 2 Ñ…Ð¾Ð½Ð¾Ð³Ð¸Ð¹Ð½ Ð´Ð¾Ñ‚Ð¾Ñ€ Ð´ÑƒÑƒÑÐ½Ð°!\nÐ¡ÑƒÐ½Ð³ÑƒÑƒÐ»Ð°Ñ…Ñ‹Ð³ Ñ…Ò¯ÑÐ²ÑÐ» ÑÐ°Ñ€Ð°Ð°Ñ€Ð°Ð¹."
             )
-            logger.info(f"1 хоногийн сануулга илгээсэн: {user['user_id']}")
         except TelegramError:
             pass
 
@@ -743,7 +505,7 @@ async def check_vip_expirations(context: ContextTypes.DEFAULT_TYPE):
         uid = user['user_id']
         gid = user['chat_id']
         name = user.get('first_name') or str(uid)
-        username = f"@{user['username']}" if user.get('username') else "—"
+        username = f"@{user['username']}" if user.get('username') else "â€”"
         chat_title = user.get('chat_title') or str(gid)
 
         db.remove_vip(uid, gid)
@@ -751,14 +513,13 @@ async def check_vip_expirations(context: ContextTypes.DEFAULT_TYPE):
         try:
             await bot.ban_chat_member(gid, uid)
             await bot.unban_chat_member(gid, uid)
-            logger.info(f"VIP хаслагдлаа: {uid} - {chat_title}")
-        except TelegramError as e:
-            logger.error(f"Группаас хасахад алдаа: {e}")
+        except TelegramError:
+            pass
 
         try:
             await bot.send_message(
                 chat_id=uid,
-                text=f"❌ {chat_title} дээрх таны VIP эрхийн хугацаа дууслаа.\nСунгуулахыг хүсвэл бидэнтэй холбогдоно уу."
+                text=f"âŒ {chat_title} Ð´ÑÑÑ€Ñ… Ñ‚Ð°Ð½Ñ‹ VIP ÑÑ€Ñ…Ð¸Ð¹Ð½ Ñ…ÑƒÐ³Ð°Ñ†Ð°Ð° Ð´ÑƒÑƒÑÐ»Ð°Ð°.\nÐ¡ÑƒÐ½Ð³ÑƒÑƒÐ»Ð°Ñ…Ñ‹Ð³ Ñ…Ò¯ÑÐ²ÑÐ» Ð±Ð¸Ð´ÑÐ½Ñ‚ÑÐ¹ Ñ…Ð¾Ð»Ð±Ð¾Ð³Ð´Ð¾Ð½Ð¾ ÑƒÑƒ."
             )
         except TelegramError:
             pass
@@ -767,20 +528,21 @@ async def check_vip_expirations(context: ContextTypes.DEFAULT_TYPE):
             try:
                 await bot.send_message(
                     chat_id=admin_id,
-                    text=f"🔔 VIP дууссан\n👤 {name} ({username})\n🆔 {uid}\n📺 {chat_title}"
+                    text=f"ðŸ”” VIP Ð´ÑƒÑƒÑÑÐ°Ð½\nðŸ‘¤ {name} ({username})\nðŸ†” {uid}\nðŸ“º {chat_title}"
                 )
             except TelegramError:
                 pass
 
 
-# ─── MAIN ─────────────────────────────────────────────────────────
+# â”€â”€â”€ MAIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def main():
     db.init_db()
     app = Application.builder().token(config.BOT_TOKEN).build()
 
     app.add_handler(CommandHandler('start', start))
-    app.add_handler(CommandHandler('timezone', cmd_timezone))
 
+    # ÐÐ´Ð¼Ð¸Ð½Ñ‹ Ð¼ÐµÑÑÐµÐ¶ â€” ÐºÐ¾Ð¼Ð°Ð½Ð´ÑƒÑƒÐ´Ñ‹Ð½ Ð´Ð°Ñ€Ð°Ð° Ð±Ò¯Ñ€Ñ‚Ð³ÑÐ³Ð´ÑÑ… Ñ‘ÑÑ‚Ð¾Ð¹, Ð³ÑÑ…Ð´ÑÑ
+    # filters-Ð°Ð°Ñ€ Ð» Ð°Ð´Ð¼Ð¸Ð½Ñ‹Ð³ ÑÐ»Ð³Ð°Ð´Ð°Ð³ Ñ‚ÑƒÐ» Ð´Ð°Ñ€Ð°Ð°Ð»Ð°Ð» Ñ…Ð°Ð¼Ð°Ð°Ð³Ò¯Ð¹; group=1-ÑÑÑ€ Ð´Ð¾Ð¾Ñˆ Ñ‚Ð°Ð²ÑŒÑ
     app.add_handler(
         MessageHandler(
             filters.ChatType.PRIVATE & filters.User(config.ADMIN_IDS) & filters.TEXT,
@@ -795,15 +557,13 @@ def main():
     app.add_handler(CommandHandler('viplist', cmd_vip_list))
     app.add_handler(CommandHandler('vipinfo', cmd_vip_info))
     app.add_handler(CommandHandler('stats', cmd_stats))
-    app.add_handler(CommandHandler('setreply', cmd_set_reply))
-    app.add_handler(CommandHandler('viewreply', cmd_view_reply))
+    app.add_handler(CommandHandler('setreply', set_reply))
+    app.add_handler(CommandHandler('viewreply', view_reply))
 
     app.add_handler(
         MessageHandler(~filters.COMMAND & filters.ChatType.PRIVATE, handle_user_message),
         group=1
     )
-
-    app.add_handler(CallbackQueryHandler(handle_callback))
 
     app.add_handler(ChatMemberHandler(handle_chat_member, ChatMemberHandler.CHAT_MEMBER))
     app.add_handler(ChatMemberHandler(handle_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
@@ -819,7 +579,7 @@ def main():
     )
     scheduler.start()
 
-    logger.info("✅ Bot ажиллаж байна...")
+    logger.info("âœ… Bot Ð°Ð¶Ð¸Ð»Ð»Ð°Ð¶ Ð±Ð°Ð¹Ð½Ð°...")
     app.run_polling(
         drop_pending_updates=True,
         allowed_updates=[
