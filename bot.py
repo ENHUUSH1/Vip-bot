@@ -784,7 +784,7 @@ def main():
     app.add_handler(
         MessageHandler(
             filters.ChatType.PRIVATE & filters.User(config.ADMIN_IDS) & filters.TEXT,
-
+            handle_admin_message
         ),
         group=1
     )
