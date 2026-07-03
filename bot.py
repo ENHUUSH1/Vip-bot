@@ -1,6 +1,7 @@
 import logging
 import re
 from datetime import datetime
+import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters,
@@ -11,6 +12,13 @@ from telegram.error import TelegramError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import database as db
 import config
+
+# Монголын цагийн бүс
+MONGOLIA_TZ = pytz.timezone('Asia/Ulaanbaatar')
+
+def get_now():
+    """Монголын одоогийн цагийг буцаана"""
+    return datetime.now(MONGOLIA_TZ)
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -111,7 +119,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     db.register_user(user.id, user.username, user.first_name)
-    context.user_data['last_message_time'] = datetime.now()
+    context.user_data['last_message_time'] = get_now()
     context.bot_data['last_user'] = user.id
 
     welcome = db.get_auto_reply()
@@ -128,7 +136,7 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if is_admin(user.id):
         return
 
-    now = datetime.now()
+    now = get_now()
     last_time = context.user_data.get('last_message_time')
     should_greet = last_time is None or (now - last_time).total_seconds() > 1800
     context.user_data['last_message_time'] = now
@@ -397,7 +405,7 @@ async def handle_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
             'chat_id': chat_id,
             'chat_title': chat_title,
             'username': f"{new_member.first_name} ({username_str})",
-            'timestamp': datetime.now().isoformat()
+            'timestamp': get_now().isoformat()
         }
 
 
@@ -450,7 +458,7 @@ async def handle_join_request_approved(update: Update, context: ContextTypes.DEF
         'chat_id': chat_id,
         'chat_title': chat_title,
         'username': f"{user.first_name} ({username_str})",
-        'timestamp': datetime.now().isoformat()
+        'timestamp': get_now().isoformat()
     }
 
 
