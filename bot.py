@@ -754,16 +754,6 @@ def main():
 
     app.add_handler(
         MessageHandler(
-            filters.C
-# ─── MAIN ─────────────────────────────────────────────────────────
-def main():
-    db.init_db()
-    app = Application.builder().token(config.BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler('start', start))
-
-    app.add_handler(
-        MessageHandler(
             filters.ChatType.PRIVATE & filters.User(config.ADMIN_IDS) & filters.TEXT,
             handle_admin_message
         ),
