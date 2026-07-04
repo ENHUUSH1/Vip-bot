@@ -1,3 +1,4 @@
+import re
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
@@ -5,6 +6,43 @@ import logging
 
 logger = logging.getLogger(__name__)
 DB_PATH = 'vip_bot.db'
+
+_DURATION_PATTERN = re.compile(r'(\d+)([dhm])')
+
+
+def parse_duration(text: str) -> Optional[timedelta]:
+    """Хугацааны текстийг timedelta болгоно.
+    d = хоног, h = цаг, m = минут. Жишээ: '3d', '12h', '30m', '1d12h30m'.
+    Зөвхөн тоо өгвөл (жишээ '3') хуучин ёсоор хоног гэж тооцно."""
+    if text is None:
+        return None
+    cleaned = text.strip().lower().replace(' ', '')
+    if not cleaned:
+        return None
+
+    if cleaned.isdigit():
+        return timedelta(days=int(cleaned))
+
+    matches = _DURATION_PATTERN.findall(cleaned)
+    if not matches:
+        return None
+
+    reconstructed = ''.join(f'{n}{u}' for n, u in matches)
+    if reconstructed != cleaned:
+        return None  # текст дотор тодорхойгүй тэмдэгт үлдсэн бол буруу гэж үзнэ
+
+    days = hours = minutes = 0
+    for num, unit in matches:
+        num = int(num)
+        if unit == 'd':
+            days += num
+        elif unit == 'h':
+            hours += num
+        elif unit == 'm':
+            minutes += num
+
+    total = timedelta(days=days, hours=hours, minutes=minutes)
+    return total if total.total_seconds() > 0 else None
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -129,10 +167,10 @@ def get_user_from_message(message_id: int, admin_id: int) -> Optional[int]:
 
 # ─── VIP MEMBERSHIPS (channel тус бүрээр тусдаа) ──────────────────
 
-def add_vip(user_id: int, chat_id: int, days: int, chat_title: str = "",
+def add_vip(user_id: int, chat_id: int, duration: timedelta, chat_title: str = "",
             username=None, first_name=None) -> datetime:
     """Тухайн user-ийг тухайн chat_id-д VIP болгоно. Аль хэдийн идэвхтэй бол
-    одоогийн дуусах хугацаанаас (эсвэл одооноос) days хоног нэмнэ."""
+    одоогийн дуусах хугацаанаас (эсвэл одооноос) duration-ийг нэмнэ."""
     ensure_user(user_id, username, first_name)
     conn = get_conn()
     c = conn.cursor()
@@ -148,7 +186,7 @@ def add_vip(user_id: int, chat_id: int, days: int, chat_title: str = "",
     else:
         base = now
 
-    expiry = base + timedelta(days=days)
+    expiry = base + duration
 
     c.execute('''
         INSERT INTO vip_memberships (user_id, chat_id, chat_title, vip_started, vip_expiry, warned_3day, warned_2day)
@@ -165,7 +203,7 @@ def add_vip(user_id: int, chat_id: int, days: int, chat_title: str = "",
     return expiry
 
 
-def extend_vip(user_id: int, chat_id: int, days: int) -> Optional[datetime]:
+def extend_vip(user_id: int, chat_id: int, duration: timedelta) -> Optional[datetime]:
     conn = get_conn()
     c = conn.cursor()
     c.execute('SELECT vip_expiry FROM vip_memberships WHERE user_id=? AND chat_id=?',
@@ -176,7 +214,7 @@ def extend_vip(user_id: int, chat_id: int, days: int) -> Optional[datetime]:
         return None
     current = datetime.fromisoformat(row['vip_expiry']) if row['vip_expiry'] else datetime.now()
     base = current if current > datetime.now() else datetime.now()
-    new_expiry = base + timedelta(days=days)
+    new_expiry = base + duration
     c.execute('''
         UPDATE vip_memberships SET vip_expiry=?, warned_3day=0, warned_2day=0
         WHERE user_id=? AND chat_id=?
