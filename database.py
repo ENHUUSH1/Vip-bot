@@ -1,11 +1,21 @@
 import re
 import sqlite3
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional, List, Dict
 import logging
 
 logger = logging.getLogger(__name__)
 DB_PATH = 'vip_bot.db'
+
+MN_TZ = ZoneInfo("Asia/Ulaanbaatar")
+
+
+def now_mn() -> datetime:
+    """Серверийн систем ямар ч timezone-той байсан, үргэлж Монголын
+    (Улаанбаатар, UTC+8) цагийг naive datetime хэлбэрээр буцаана."""
+    return datetime.now(MN_TZ).replace(tzinfo=None)
+
 
 _DURATION_PATTERN = re.compile(r'(\d+)([dhm])')
 
@@ -118,7 +128,7 @@ def register_user(user_id: int, username: Optional[str], first_name: Optional[st
     c.execute('''
         INSERT INTO users (user_id, username, first_name, registered_at)
         VALUES (?, ?, ?, ?)
-    ''', (user_id, username, first_name, datetime.now().isoformat()))
+    ''', (user_id, username, first_name, now_mn().isoformat()))
     conn.commit()
     conn.close()
     return True
@@ -130,7 +140,7 @@ def ensure_user(user_id: int, username=None, first_name=None):
     c.execute('''
         INSERT OR IGNORE INTO users (user_id, username, first_name, registered_at)
         VALUES (?, ?, ?, ?)
-    ''', (user_id, username, first_name, datetime.now().isoformat()))
+    ''', (user_id, username, first_name, now_mn().isoformat()))
     conn.commit()
     conn.close()
 
@@ -150,7 +160,7 @@ def save_message_map(message_id: int, user_id: int, admin_id: int):
     c.execute('''
         INSERT OR REPLACE INTO message_map (message_id, admin_id, user_id, created_at)
         VALUES (?, ?, ?, ?)
-    ''', (message_id, admin_id, user_id, datetime.now().isoformat()))
+    ''', (message_id, admin_id, user_id, now_mn().isoformat()))
     conn.commit()
     conn.close()
 
@@ -179,7 +189,7 @@ def add_vip(user_id: int, chat_id: int, duration: timedelta, chat_title: str = "
               (user_id, chat_id))
     row = c.fetchone()
 
-    now = datetime.now()
+    now = now_mn()
     if row and row['vip_expiry']:
         existing_expiry = datetime.fromisoformat(row['vip_expiry'])
         base = existing_expiry if existing_expiry > now else now
@@ -187,6 +197,32 @@ def add_vip(user_id: int, chat_id: int, duration: timedelta, chat_title: str = "
         base = now
 
     expiry = base + duration
+
+    c.execute('''
+        INSERT INTO vip_memberships (user_id, chat_id, chat_title, vip_started, vip_expiry, warned_3day, warned_2day)
+        VALUES (?, ?, ?, ?, ?, 0, 0)
+        ON CONFLICT(user_id, chat_id) DO UPDATE SET
+            chat_title=excluded.chat_title,
+            vip_expiry=excluded.vip_expiry,
+            warned_3day=0,
+            warned_2day=0
+    ''', (user_id, chat_id, chat_title, now.isoformat(), expiry.isoformat()))
+
+    conn.commit()
+    conn.close()
+    return expiry
+
+
+def set_vip(user_id: int, chat_id: int, duration: timedelta, chat_title: str = "",
+            username=None, first_name=None) -> datetime:
+    """Тухайн user-ийн VIP хугацааг ОДООГООС эхлүүлж ШИНЭЭР тогтооно
+    (хуучин дуусах хугацааг үл тооцно). Буруу оруулсан хугацааг засахад ашиглана."""
+    ensure_user(user_id, username, first_name)
+    conn = get_conn()
+    c = conn.cursor()
+
+    now = now_mn()
+    expiry = now + duration
 
     c.execute('''
         INSERT INTO vip_memberships (user_id, chat_id, chat_title, vip_started, vip_expiry, warned_3day, warned_2day)
@@ -212,8 +248,8 @@ def extend_vip(user_id: int, chat_id: int, duration: timedelta) -> Optional[date
     if not row:
         conn.close()
         return None
-    current = datetime.fromisoformat(row['vip_expiry']) if row['vip_expiry'] else datetime.now()
-    base = current if current > datetime.now() else datetime.now()
+    current = datetime.fromisoformat(row['vip_expiry']) if row['vip_expiry'] else now_mn()
+    base = current if current > now_mn() else now_mn()
     new_expiry = base + duration
     c.execute('''
         UPDATE vip_memberships SET vip_expiry=?, warned_3day=0, warned_2day=0
@@ -296,7 +332,7 @@ def get_stats() -> Dict:
 def get_expiring_soon(days: int) -> List[Dict]:
     conn = get_conn()
     c = conn.cursor()
-    target = datetime.now() + timedelta(days=days)
+    target = now_mn() + timedelta(days=days)
     date_str = target.strftime('%Y-%m-%d')
     warn_col = 'warned_3day' if days == 3 else 'warned_2day'
     c.execute(f'''
@@ -319,7 +355,7 @@ def get_expired_vips() -> List[Dict]:
     """Хугацаа дууссан бичлэгүүд (бүх channel дотроос)."""
     conn = get_conn()
     c = conn.cursor()
-    now = datetime.now().isoformat()
+    now = now_mn().isoformat()
     c.execute('''
         SELECT vm.*, u.username, u.first_name
         FROM vip_memberships vm
