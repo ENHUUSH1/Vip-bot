@@ -519,7 +519,9 @@ async def view_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ─── SCHEDULER ────────────────────────────────────────────────────
-async def check_vip_expirations(context: ContextTypes.DEFAULT_TYPE):
+async def check_expiry_warnings(context: ContextTypes.DEFAULT_TYPE):
+    """Өдөрт 1 удаа (09:00) ажиллаж, 3 болон 2 хоногийн дотор дуусах
+    хэрэглэгчдэд сануулга илгээнэ."""
     bot = context.bot
 
     for user in db.get_expiring_soon(3):
@@ -539,6 +541,11 @@ async def check_vip_expirations(context: ContextTypes.DEFAULT_TYPE):
             )
         except TelegramError:
             pass
+
+
+async def check_expired_vips(context: ContextTypes.DEFAULT_TYPE):
+    """Байнга (минут тутам) ажиллаж, хугацаа дууссан VIP-үүдийг шууд хасна."""
+    bot = context.bot
 
     for user in db.get_expired_vips():
         uid = user['user_id']
@@ -610,7 +617,13 @@ def main():
 
     scheduler = AsyncIOScheduler(timezone=db.MN_TZ)
     scheduler.add_job(
-        check_vip_expirations,
+        check_expired_vips,
+        trigger='interval',
+        minutes=1,
+        kwargs={'context': app}
+    )
+    scheduler.add_job(
+        check_expiry_warnings,
         trigger='cron',
         hour=9,
         minute=0,
