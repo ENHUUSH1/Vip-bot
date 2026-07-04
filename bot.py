@@ -132,25 +132,53 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
             chat_id = pending['chat_id']
             chat_title = pending.get('chat_title', '')
             username = pending['username']
-            expiry = db.add_vip(target_user_id, chat_id, duration, chat_title=chat_title)
-            expiry_str = expiry.strftime('%Y-%m-%d %H:%M')
-            await message.reply_text(
-                f"✅ VIP нэмэгдлээ\n"
-                f"👤 {username}\n"
-                f"🆔 {target_user_id}\n"
-                f"📺 {chat_title or chat_id}\n"
-                f"📅 Дуусах: {expiry_str}"
-            )
-            try:
-                await context.bot.send_message(
-                    chat_id=target_user_id,
-                    text=f"🎉 Таны VIP эрх идэвхжлээ!\n📅 Дуусах огноо: {expiry_str}"
+
+            if pending.get('answered'):
+                # Админ өмнө нь хариулсан ч буруу бичсэн гэж дахин илгээж байна —
+                # хугацааг ОДООГООС шинээр тогтооно (нэмэхгүй, орлуулна).
+                expiry = db.set_vip(target_user_id, chat_id, duration, chat_title=chat_title)
+                expiry_str = expiry.strftime('%Y-%m-%d %H:%M')
+                await message.reply_text(
+                    f"🔄 Хугацаа засварлагдлаа\n"
+                    f"👤 {username}\n"
+                    f"🆔 {target_user_id}\n"
+                    f"📺 {chat_title or chat_id}\n"
+                    f"📅 Шинэ дуусах: {expiry_str}"
                 )
-            except TelegramError:
-                pass
-            context.bot_data.pop('pending_vip', None)
+                try:
+                    await context.bot.send_message(
+                        chat_id=target_user_id,
+                        text=f"ℹ️ Таны VIP дуусах хугацаа шинэчлэгдлээ.\n📅 Шинэ дуусах огноо: {expiry_str}"
+                    )
+                except TelegramError:
+                    pass
+            else:
+                expiry = db.add_vip(target_user_id, chat_id, duration, chat_title=chat_title)
+                expiry_str = expiry.strftime('%Y-%m-%d %H:%M')
+                await message.reply_text(
+                    f"✅ VIP нэмэгдлээ\n"
+                    f"👤 {username}\n"
+                    f"🆔 {target_user_id}\n"
+                    f"📺 {chat_title or chat_id}\n"
+                    f"📅 Дуусах: {expiry_str}\n\n"
+                    f"⚠️ Хугацаа буруу бол дахин зөв хугацаа бичихэд шууд засна."
+                )
+                try:
+                    await context.bot.send_message(
+                        chat_id=target_user_id,
+                        text=f"🎉 Таны VIP эрх идэвхжлээ!\n📅 Дуусах огноо: {expiry_str}"
+                    )
+                except TelegramError:
+                    pass
+                pending['answered'] = True
+                context.bot_data['pending_vip'] = pending
             return
         # Формат таарахгүй бол доош нь үргэлжилнэ (өөр команд гэж үзнэ)
+
+    if text == '/done' and pending:
+        context.bot_data.pop('pending_vip', None)
+        await message.reply_text("✅ Дууслаа. Хугацаа засах горим хаагдлаа.")
+        return
 
     # ── /r ID текст ──
     if text.startswith('/r '):
@@ -217,7 +245,7 @@ async def handle_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"🆔 ID: {new_member.id}\n"
             f"📺 Суваг: {chat_title}\n\n"
             f"Энэ хүн хэдэн хоногоор VIP эрхтэй вэ?\n"
-            f"(Жишээ: 3d = 3 хоног, 12t = 12 цаг, 30m = 30 минут, эсвэл 1d12t)"
+            f"(Жишээ: 3d = 3 хоног, 12h = 12 цаг, 30m = 30 минут, эсвэл 1d12h)"
         )
 
         for admin_id in config.ADMIN_IDS:
@@ -263,7 +291,7 @@ async def handle_join_request_approved(update: Update, context: ContextTypes.DEF
         f"🆔 ID: {user.id}\n"
         f"📺 Суваг: {chat_title}\n\n"
         f"Энэ хүн хэдэн хоногоор VIP эрхтэй вэ?\n"
-        f"(Жишээ: 3d = 3 хоног, 12t = 12 цаг, 30m = 30 минут, эсвэл 1d12t)"
+        f"(Жишээ: 3d = 3 хоног, 12h = 12 цаг, 30m = 30 минут, эсвэл 1d12h)"
     )
 
     for admin_id in config.ADMIN_IDS:
@@ -288,7 +316,7 @@ async def cmd_add_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(args) != 3:
         await update.message.reply_text(
             "📌 Хэрэглээ: /addvip [user_id] [chat_id] [хугацаа]\n"
-            "Хугацаа: 3d (хоног), 12t (цаг), 30m (минут), эсвэл хослуулж 1d12t"
+            "Хугацаа: 3d (хоног), 12h (цаг), 30m (минут), эсвэл хослуулж 1d12h"
         )
         return
     try:
@@ -299,7 +327,7 @@ async def cmd_add_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     duration = db.parse_duration(args[2])
     if duration is None:
-        await update.message.reply_text("❌ Хугацааны формат буруу. Жишээ: 3d, 12t, 30m, 1d12t")
+        await update.message.reply_text("❌ Хугацааны формат буруу. Жишээ: 3d, 12h, 30m, 1d12h")
         return
 
     chat_title = ""
@@ -335,7 +363,7 @@ async def cmd_extend_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(args) != 3:
         await update.message.reply_text(
             "📌 Хэрэглээ: /extendvip [user_id] [chat_id] [хугацаа]\n"
-            "Хугацаа: 3d (хоног), 12t (цаг), 30m (минут), эсвэл хослуулж 1d12t"
+            "Хугацаа: 3d (хоног), 12h (цаг), 30m (минут), эсвэл хослуулж 1d12h"
         )
         return
     try:
@@ -346,7 +374,7 @@ async def cmd_extend_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     duration = db.parse_duration(args[2])
     if duration is None:
-        await update.message.reply_text("❌ Хугацааны формат буруу. Жишээ: 3d, 12t, 30m, 1d12t")
+        await update.message.reply_text("❌ Хугацааны формат буруу. Жишээ: 3d, 12h, 30m, 1d12h")
         return
     result = db.extend_vip(user_id, chat_id, duration)
     if result:
@@ -580,7 +608,7 @@ def main():
     app.add_handler(ChatMemberHandler(handle_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     app.add_handler(ChatJoinRequestHandler(handle_join_request_approved))
 
-    scheduler = AsyncIOScheduler()
+    scheduler = AsyncIOScheduler(timezone=db.MN_TZ)
     scheduler.add_job(
         check_vip_expirations,
         trigger='cron',
@@ -602,4 +630,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
