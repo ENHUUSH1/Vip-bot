@@ -21,6 +21,17 @@ def is_admin(user_id: int) -> bool:
     return user_id in config.ADMIN_IDS
 
 
+# ─── КИНО ТОО ТУХАЙ АСУУЛТ ТАНИХ ────────────────────────────────────
+_COUNT_WORDS = ('хэд', 'хэдэн', 'хичнээн', 'хэчнээн', 'тоо')
+
+
+def is_movie_count_question(text: str) -> bool:
+    """Хэрэглэгчийн мессеж кино тооны талаарх асуулт эсэхийг таамаглана.
+    Жишээ: 'Хүүхдийн кино vip-д хэдэн кино байгаа вэ?'"""
+    t = text.lower()
+    return 'кино' in t and any(w in t for w in _COUNT_WORDS)
+
+
 async def forward_to_admins(context: ContextTypes.DEFAULT_TYPE, user, header_extra: str = ""):
     """Хэрэглэгчийн талаарх мэдээллийг бүх админд дамжуулна (start үед ашиглана)."""
     username_str = f"@{user.username}" if user.username else "username байхгүй"
@@ -58,12 +69,12 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if is_admin(user.id):
         return
 
+    db.register_user(user.id, user.username, user.first_name)
+
     now = datetime.now()
     last_time = context.user_data.get('last_message_time')
     should_greet = last_time is None or (now - last_time).total_seconds() > 1800
     context.user_data['last_message_time'] = now
-
-    db.register_user(user.id, user.username, user.first_name)
 
     if should_greet:
         welcome = db.get_auto_reply()
@@ -122,6 +133,24 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     text = message.text.strip()
+
+    # ── Админ өөрөө бот-оос кино тоо асуувал шууд хариулна ──
+    if is_movie_count_question(text):
+        match = db.find_movie_count_by_text(text)
+        if match:
+            title = match['chat_title'] or str(match['chat_id'])
+            await message.reply_text(f"🎬 {title} сувагт одоогоор {match['count']} кино байна.")
+        else:
+            rows = db.get_movie_counts()
+            if rows:
+                lines = ["🎬 Кино тоо (суваг тус бүрээр):"]
+                for r in rows:
+                    t = r['chat_title'] or str(r['chat_id'])
+                    lines.append(f"• {t}: {r['count']}")
+                await message.reply_text("\n".join(lines))
+            else:
+                await message.reply_text("Кино тооны мэдээлэл одоогоор бүртгэгдээгүй байна.")
+        return
 
     # ── VIP хугацаа асуулт хариулах (bot_data дотор хадгалсан) ──
     pending = context.bot_data.get('pending_vip')
@@ -219,6 +248,24 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await context.bot.send_message(chat_id=last_user, text=text)
     except TelegramError as e:
         await message.reply_text(f"❌ Алдаа: {e}")
+
+
+# ─── СУВАГТ ШИНЭ КИНО ОРОХ (channel_post) ──────────────────────────
+async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """VIP сувгуудад шинэ кино (видео/файл) орж ирэх бүрт тухайн
+    сувгийн кино тоог автоматаар нэмнэ."""
+    post = update.channel_post
+    if not post:
+        return
+    chat = post.chat
+    if chat.id not in config.VIP_GROUP_IDS:
+        return
+    # Зөвхөн кино контент (видео/файл/анимаци) ирсэн үед л тоолно —
+    # энгийн текст мэдэгдэл, зураг зэргийг тоонд оруулахгүй.
+    if not (post.video or post.document or post.animation):
+        return
+    new_count = db.increment_movie_count(chat.id, chat.title or "")
+    logger.info(f"🎬 {chat.title or chat.id}: кино тоо {new_count} боллоо.")
 
 
 # ─── VIP ГРУППТ ШИНЭ ГИШҮҮН (group-д л ажиллана) ──────────────────
@@ -534,6 +581,41 @@ async def view_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Автомат хариулт:\n{current}")
 
 
+# ─── КИНО ТООНЫ КОМАНДУУД ───────────────────────────────────────────
+async def cmd_set_movie_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return
+    args = context.args
+    if len(args) < 2:
+        await update.message.reply_text(
+            "📌 Хэрэглээ: /setmoviecount [chat_id] [тоо]\n"
+            "(Кино автоматаар тоологдох ч давхардал/алдаа гарвал үүгээр засна)"
+        )
+        return
+    try:
+        chat_id = int(args[0])
+        count = int(args[1])
+    except ValueError:
+        await update.message.reply_text("❌ chat_id/тоо буруу формат.")
+        return
+    db.set_movie_count(chat_id, count)
+    await update.message.reply_text(f"✅ {chat_id} — кино тоог {count} болгож тохирууллаа.")
+
+
+async def cmd_movie_counts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return
+    rows = db.get_movie_counts()
+    if not rows:
+        await update.message.reply_text("Бүртгэгдсэн суваг байхгүй байна (кино орж ирэх хүртэл автоматаар бүртгэгдэнэ).")
+        return
+    lines = ["🎬 Суваг тус бүрийн кино тоо:"]
+    for r in rows:
+        title = r['chat_title'] or str(r['chat_id'])
+        lines.append(f"• {title}: {r['count']} ({r['chat_id']})")
+    await update.message.reply_text("\n".join(lines))
+
+
 # ─── SCHEDULER ────────────────────────────────────────────────────
 async def check_expiry_warnings(context: ContextTypes.DEFAULT_TYPE):
     """Өдөрт 1 удаа (09:00) ажиллаж, 3 болон 2 хоногийн дотор дуусах
@@ -621,6 +703,8 @@ def main():
     app.add_handler(CommandHandler('stats', cmd_stats))
     app.add_handler(CommandHandler('setreply', set_reply))
     app.add_handler(CommandHandler('viewreply', view_reply))
+    app.add_handler(CommandHandler('setmoviecount', cmd_set_movie_count))
+    app.add_handler(CommandHandler('moviecounts', cmd_movie_counts))
 
     app.add_handler(
         MessageHandler(~filters.COMMAND & filters.ChatType.PRIVATE, handle_user_message),
@@ -630,6 +714,7 @@ def main():
     app.add_handler(ChatMemberHandler(handle_chat_member, ChatMemberHandler.CHAT_MEMBER))
     app.add_handler(ChatMemberHandler(handle_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     app.add_handler(ChatJoinRequestHandler(handle_join_request_approved))
+    app.add_handler(MessageHandler(filters.ChatType.CHANNEL, handle_channel_post))
 
     scheduler = AsyncIOScheduler(timezone=db.MN_TZ)
     scheduler.add_job(
