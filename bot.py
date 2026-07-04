@@ -236,6 +236,14 @@ async def handle_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
     new_member = result.new_chat_member.user
 
     if old_status in ['left', 'kicked'] and new_status in ['member', 'administrator']:
+        # Хэрэв энэ хэрэглэгчийг сая handle_join_request_approved (channel-ийн
+        # "Approve new members" горим) аль хэдийн асуусан бол давхардуулж
+        # дахин бичихгүй — Telegram join request зөвшөөрөгдөх үед мөн энэ
+        # chat_member event-ийг автоматаар үүсгэдэг тул.
+        pending = context.bot_data.get('pending_vip')
+        if pending and pending.get('user_id') == new_member.id and pending.get('chat_id') == chat_id:
+            return
+
         username_str = f"@{new_member.username}" if new_member.username else "—"
         chat_title = result.chat.title or str(chat_id)
 
@@ -651,4 +659,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
