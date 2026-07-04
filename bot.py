@@ -148,7 +148,7 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 try:
                     await context.bot.send_message(
                         chat_id=target_user_id,
-                        text=f"ℹ️ Таны VIP дуусах хугацаа шинэчлэгдлээ.\n📅 Шинэ дуусах огноо: {expiry_str}"
+                        text=f"ℹ️ Таны VIP дуусах хугацаа шинэчлэгдлээ.\n📺 {chat_title or chat_id}\n📅 Шинэ дуусах огноо: {expiry_str}"
                     )
                 except TelegramError:
                     pass
@@ -166,7 +166,7 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 try:
                     await context.bot.send_message(
                         chat_id=target_user_id,
-                        text=f"🎉 Таны VIP эрх идэвхжлээ!\n📅 Дуусах огноо: {expiry_str}"
+                        text=f"🎉 Таны VIP эрх идэвхжлээ!\n📺 {chat_title or chat_id}\n📅 Дуусах огноо: {expiry_str}"
                     )
                 except TelegramError:
                     pass
@@ -350,7 +350,7 @@ async def cmd_add_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await context.bot.send_message(
             chat_id=user_id,
-            text=f"🎉 Таны VIP эрх идэвхжлээ!\n📅 Дуусах огноо: {expiry_str}"
+            text=f"🎉 Таны VIP эрх идэвхжлээ!\n📺 {chat_title or chat_id}\n📅 Дуусах огноо: {expiry_str}"
         )
     except TelegramError:
         pass
@@ -376,14 +376,22 @@ async def cmd_extend_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if duration is None:
         await update.message.reply_text("❌ Хугацааны формат буруу. Жишээ: 3d, 12h, 30m, 1d12h")
         return
+
+    chat_title = ""
+    try:
+        chat = await context.bot.get_chat(chat_id)
+        chat_title = chat.title or ""
+    except TelegramError:
+        pass
+
     result = db.extend_vip(user_id, chat_id, duration)
     if result:
         expiry_str = result.strftime('%Y-%m-%d %H:%M')
-        await update.message.reply_text(f"✅ VIP сунгагдлаа\n📅 Шинэ дуусах: {expiry_str}")
+        await update.message.reply_text(f"✅ VIP сунгагдлаа\n📺 {chat_title or chat_id}\n📅 Шинэ дуусах: {expiry_str}")
         try:
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"🎉 VIP сунгагдлаа!\n📅 Шинэ дуусах огноо: {expiry_str}"
+                text=f"🎉 VIP сунгагдлаа!\n📺 {chat_title or chat_id}\n📅 Шинэ дуусах огноо: {expiry_str}"
             )
         except TelegramError:
             pass
@@ -643,3 +651,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
