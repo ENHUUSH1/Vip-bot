@@ -125,15 +125,15 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # ── VIP хугацаа асуулт хариулах (bot_data дотор хадгалсан) ──
     pending = context.bot_data.get('pending_vip')
-    if pending and text.lstrip('-').isdigit():
-        try:
-            days = int(text)
+    if pending:
+        duration = db.parse_duration(text)
+        if duration is not None:
             target_user_id = pending['user_id']
             chat_id = pending['chat_id']
             chat_title = pending.get('chat_title', '')
             username = pending['username']
-            expiry = db.add_vip(target_user_id, chat_id, days, chat_title=chat_title)
-            expiry_str = expiry.strftime('%Y-%m-%d')
+            expiry = db.add_vip(target_user_id, chat_id, duration, chat_title=chat_title)
+            expiry_str = expiry.strftime('%Y-%m-%d %H:%M')
             await message.reply_text(
                 f"✅ VIP нэмэгдлээ\n"
                 f"👤 {username}\n"
@@ -150,8 +150,7 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 pass
             context.bot_data.pop('pending_vip', None)
             return
-        except ValueError:
-            pass  # тоо биш бол доош нь үргэлжилнэ (өөр команд гэж үзнэ)
+        # Формат таарахгүй бол доош нь үргэлжилнэ (өөр команд гэж үзнэ)
 
     # ── /r ID текст ──
     if text.startswith('/r '):
@@ -218,7 +217,7 @@ async def handle_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"🆔 ID: {new_member.id}\n"
             f"📺 Суваг: {chat_title}\n\n"
             f"Энэ хүн хэдэн хоногоор VIP эрхтэй вэ?\n"
-            f"(Тоо бичнэ үү)"
+            f"(Жишээ: 3d = 3 хоног, 12t = 12 цаг, 30m = 30 минут, эсвэл 1d12t)"
         )
 
         for admin_id in config.ADMIN_IDS:
@@ -264,7 +263,7 @@ async def handle_join_request_approved(update: Update, context: ContextTypes.DEF
         f"🆔 ID: {user.id}\n"
         f"📺 Суваг: {chat_title}\n\n"
         f"Энэ хүн хэдэн хоногоор VIP эрхтэй вэ?\n"
-        f"(Тоо бичнэ үү)"
+        f"(Жишээ: 3d = 3 хоног, 12t = 12 цаг, 30m = 30 минут, эсвэл 1d12t)"
     )
 
     for admin_id in config.ADMIN_IDS:
@@ -287,14 +286,20 @@ async def cmd_add_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     args = context.args
     if len(args) != 3:
-        await update.message.reply_text("📌 Хэрэглээ: /addvip [user_id] [chat_id] [хоног]")
+        await update.message.reply_text(
+            "📌 Хэрэглээ: /addvip [user_id] [chat_id] [хугацаа]\n"
+            "Хугацаа: 3d (хоног), 12t (цаг), 30m (минут), эсвэл хослуулж 1d12t"
+        )
         return
     try:
         user_id = int(args[0])
         chat_id = int(args[1])
-        days = int(args[2])
     except ValueError:
-        await update.message.reply_text("❌ Буруу формат.")
+        await update.message.reply_text("❌ user_id/chat_id буруу формат.")
+        return
+    duration = db.parse_duration(args[2])
+    if duration is None:
+        await update.message.reply_text("❌ Хугацааны формат буруу. Жишээ: 3d, 12t, 30m, 1d12t")
         return
 
     chat_title = ""
@@ -304,8 +309,8 @@ async def cmd_add_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except TelegramError:
         pass
 
-    expiry = db.add_vip(user_id, chat_id, days, chat_title=chat_title)
-    expiry_str = expiry.strftime('%Y-%m-%d')
+    expiry = db.add_vip(user_id, chat_id, duration, chat_title=chat_title)
+    expiry_str = expiry.strftime('%Y-%m-%d %H:%M')
     user_info = db.get_user_info(user_id)
     name = user_info['first_name'] if user_info and user_info['first_name'] else str(user_id)
     username = f"@{user_info['username']}" if user_info and user_info['username'] else "—"
@@ -328,18 +333,24 @@ async def cmd_extend_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     args = context.args
     if len(args) != 3:
-        await update.message.reply_text("📌 Хэрэглээ: /extendvip [user_id] [chat_id] [хоног]")
+        await update.message.reply_text(
+            "📌 Хэрэглээ: /extendvip [user_id] [chat_id] [хугацаа]\n"
+            "Хугацаа: 3d (хоног), 12t (цаг), 30m (минут), эсвэл хослуулж 1d12t"
+        )
         return
     try:
         user_id = int(args[0])
         chat_id = int(args[1])
-        days = int(args[2])
     except ValueError:
-        await update.message.reply_text("❌ Буруу формат.")
+        await update.message.reply_text("❌ user_id/chat_id буруу формат.")
         return
-    result = db.extend_vip(user_id, chat_id, days)
+    duration = db.parse_duration(args[2])
+    if duration is None:
+        await update.message.reply_text("❌ Хугацааны формат буруу. Жишээ: 3d, 12t, 30m, 1d12t")
+        return
+    result = db.extend_vip(user_id, chat_id, duration)
     if result:
-        expiry_str = result.strftime('%Y-%m-%d')
+        expiry_str = result.strftime('%Y-%m-%d %H:%M')
         await update.message.reply_text(f"✅ VIP сунгагдлаа\n📅 Шинэ дуусах: {expiry_str}")
         try:
             await context.bot.send_message(
@@ -406,7 +417,7 @@ async def cmd_vip_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for v in vips:
         name = v['first_name'] or '—'
         username = f"@{v['username']}" if v['username'] else "—"
-        expiry = v['vip_expiry'][:10] if v['vip_expiry'] else "—"
+        expiry = v['vip_expiry'][:16].replace('T', ' ') if v['vip_expiry'] else "—"
         chat_title = v['chat_title'] or str(v['chat_id'])
         lines.append(f"{name} ({username}) | {v['user_id']} | {chat_title} | {expiry}")
     await update.message.reply_text("\n".join(lines))
@@ -442,7 +453,7 @@ async def cmd_vip_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("VIP channel-ууд:")
         for m in memberships:
             chat_title = m['chat_title'] or str(m['chat_id'])
-            expiry = m['vip_expiry'][:10] if m['vip_expiry'] else "—"
+            expiry = m['vip_expiry'][:16].replace('T', ' ') if m['vip_expiry'] else "—"
             lines.append(f"  • {chat_title}: {expiry}")
     await update.message.reply_text("\n".join(lines))
 
@@ -591,3 +602,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
