@@ -12,8 +12,8 @@ MN_TZ = ZoneInfo("Asia/Ulaanbaatar")
 
 
 def now_mn() -> datetime:
-    """Серверийн систем ямар ч timezone-той байсан, үргэлж Монголын
-    (Улаанбаатар, UTC+8) цагийг naive datetime хэлбэрээр буцаана."""
+    """Ð¡ÐµÑ€Ð²ÐµÑ€Ð¸Ð¹Ð½ ÑÐ¸ÑÑ‚ÐµÐ¼ ÑÐ¼Ð°Ñ€ Ñ‡ timezone-Ñ‚Ð¾Ð¹ Ð±Ð°Ð¹ÑÐ°Ð½, Ò¯Ñ€Ð³ÑÐ»Ð¶ ÐœÐ¾Ð½Ð³Ð¾Ð»Ñ‹Ð½
+    (Ð£Ð»Ð°Ð°Ð½Ð±Ð°Ð°Ñ‚Ð°Ñ€, UTC+8) Ñ†Ð°Ð³Ð¸Ð¹Ð³ naive datetime Ñ…ÑÐ»Ð±ÑÑ€ÑÑÑ€ Ð±ÑƒÑ†Ð°Ð°Ð½Ð°."""
     return datetime.now(MN_TZ).replace(tzinfo=None)
 
 
@@ -21,9 +21,9 @@ _DURATION_PATTERN = re.compile(r'(\d+)([dhm])')
 
 
 def parse_duration(text: str) -> Optional[timedelta]:
-    """Хугацааны текстийг timedelta болгоно.
-    d = хоног, h = цаг, m = минут. Жишээ: '3d', '12h', '30m', '1d12h30m'.
-    Зөвхөн тоо өгвөл (жишээ '3') хуучин ёсоор хоног гэж тооцно."""
+    """Ð¥ÑƒÐ³Ð°Ñ†Ð°Ð°Ð½Ñ‹ Ñ‚ÐµÐºÑÑ‚Ð¸Ð¹Ð³ timedelta Ð±Ð¾Ð»Ð³Ð¾Ð½Ð¾.
+    d = Ñ…Ð¾Ð½Ð¾Ð³, h = Ñ†Ð°Ð³, m = Ð¼Ð¸Ð½ÑƒÑ‚. Ð–Ð¸ÑˆÑÑ: '3d', '12h', '30m', '1d12h30m'.
+    Ð—Ó©Ð²Ñ…Ó©Ð½ Ñ‚Ð¾Ð¾ Ó©Ð³Ð²Ó©Ð» (Ð¶Ð¸ÑˆÑÑ '3') Ñ…ÑƒÑƒÑ‡Ð¸Ð½ Ñ‘ÑÐ¾Ð¾Ñ€ Ñ…Ð¾Ð½Ð¾Ð³ Ð³ÑÐ¶ Ñ‚Ð¾Ð¾Ñ†Ð½Ð¾."""
     if text is None:
         return None
     cleaned = text.strip().lower().replace(' ', '')
@@ -39,7 +39,7 @@ def parse_duration(text: str) -> Optional[timedelta]:
 
     reconstructed = ''.join(f'{n}{u}' for n, u in matches)
     if reconstructed != cleaned:
-        return None  # текст дотор тодорхойгүй тэмдэгт үлдсэн бол буруу гэж үзнэ
+        return None  # Ñ‚ÐµÐºÑÑ‚ Ð´Ð¾Ñ‚Ð¾Ñ€ Ñ‚Ð¾Ð´Ð¾Ñ€Ñ…Ð¾Ð¹Ð³Ò¯Ð¹ Ñ‚ÑÐ¼Ð´ÑÐ³Ñ‚ Ò¯Ð»Ð´ÑÑÐ½ Ð±Ð¾Ð» Ð±ÑƒÑ€ÑƒÑƒ Ð³ÑÐ¶ Ò¯Ð·Ð½Ñ
 
     days = hours = minutes = 0
     for num, unit in matches:
@@ -63,7 +63,7 @@ def init_db():
     conn = get_conn()
     c = conn.cursor()
 
-    # Хэрэглэгчийн ерөнхий мэдээлэл
+    # Ð¥ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡Ð¸Ð¹Ð½ ÐµÑ€Ó©Ð½Ñ…Ð¸Ð¹ Ð¼ÑÐ´ÑÑÐ»ÑÐ»
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id       INTEGER PRIMARY KEY,
@@ -73,7 +73,7 @@ def init_db():
         )
     ''')
 
-    # Хэрэглэгч тус бүрийн channel тус бүрийн VIP бичлэг
+    # Ð¥ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡ Ñ‚ÑƒÑ Ð±Ò¯Ñ€Ð¸Ð¹Ð½ channel Ñ‚ÑƒÑ Ð±Ò¯Ñ€Ð¸Ð¹Ð½ VIP Ð±Ð¸Ñ‡Ð»ÑÐ³
     c.execute('''
         CREATE TABLE IF NOT EXISTS vip_memberships (
             user_id      INTEGER,
@@ -106,16 +106,7 @@ def init_db():
 
     c.execute('''
         INSERT OR IGNORE INTO settings (key, value)
-        VALUES ('auto_reply', '🎬 VIP кино группт элсэх бол төлбөрөө төлөөд хүлээнэ үү.\n\nАсуух зүйл байвал энэ бот руу бичнэ үү, бид удахгүй хариулна.')
-    ''')
-
-    # Суваг тус бүрийн кино тоо (channel_post ирэх бүрт автоматаар нэмэгдэнэ)
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS movie_counts (
-            chat_id    INTEGER PRIMARY KEY,
-            chat_title TEXT,
-            count      INTEGER DEFAULT 0
-        )
+        VALUES ('auto_reply', 'ðŸŽ¬ VIP ÐºÐ¸Ð½Ð¾ Ð³Ñ€ÑƒÐ¿Ð¿Ñ‚ ÑÐ»ÑÑÑ… Ð±Ð¾Ð» Ñ‚Ó©Ð»Ð±Ó©Ñ€Ó©Ó© Ñ‚Ó©Ð»Ó©Ó©Ð´ Ñ…Ò¯Ð»ÑÑÐ½Ñ Ò¯Ò¯.\n\nÐÑÑƒÑƒÑ… Ð·Ò¯Ð¹Ð» Ð±Ð°Ð¹Ð²Ð°Ð» ÑÐ½Ñ Ð±Ð¾Ñ‚ Ñ€ÑƒÑƒ Ð±Ð¸Ñ‡Ð½Ñ Ò¯Ò¯, Ð±Ð¸Ð´ ÑƒÐ´Ð°Ñ…Ð³Ò¯Ð¹ Ñ…Ð°Ñ€Ð¸ÑƒÐ»Ð½Ð°.')
     ''')
 
     conn.commit()
@@ -184,12 +175,12 @@ def get_user_from_message(message_id: int, admin_id: int) -> Optional[int]:
     return row['user_id'] if row else None
 
 
-# ─── VIP MEMBERSHIPS (channel тус бүрээр тусдаа) ──────────────────
+# â”€â”€â”€ VIP MEMBERSHIPS (channel Ñ‚ÑƒÑ Ð±Ò¯Ñ€ÑÑÑ€ Ñ‚ÑƒÑÐ´Ð°Ð°) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def add_vip(user_id: int, chat_id: int, duration: timedelta, chat_title: str = "",
             username=None, first_name=None) -> datetime:
-    """Тухайн user-ийг тухайн chat_id-д VIP болгоно. Аль хэдийн идэвхтэй бол
-    одоогийн дуусах хугацаанаас (эсвэл одооноос) duration-ийг нэмнэ."""
+    """Ð¢ÑƒÑ…Ð°Ð¹Ð½ user-Ð¸Ð¹Ð³ Ñ‚ÑƒÑ…Ð°Ð¹Ð½ chat_id-Ð´ VIP Ð±Ð¾Ð»Ð³Ð¾Ð½Ð¾. ÐÐ»ÑŒ Ñ…ÑÐ´Ð¸Ð¹Ð½ Ð¸Ð´ÑÐ²Ñ…Ñ‚ÑÐ¹ Ð±Ð¾Ð»
+    Ð¾Ð´Ð¾Ð¾Ð³Ð¸Ð¹Ð½ Ð´ÑƒÑƒÑÐ°Ñ… Ñ…ÑƒÐ³Ð°Ñ†Ð°Ð°Ð½Ð°Ð°Ñ (ÑÑÐ²ÑÐ» Ð¾Ð´Ð¾Ð¾Ð½Ð¾Ð¾Ñ) duration-Ð¸Ð¹Ð³ Ð½ÑÐ¼Ð½Ñ."""
     ensure_user(user_id, username, first_name)
     conn = get_conn()
     c = conn.cursor()
@@ -224,8 +215,8 @@ def add_vip(user_id: int, chat_id: int, duration: timedelta, chat_title: str = "
 
 def set_vip(user_id: int, chat_id: int, duration: timedelta, chat_title: str = "",
             username=None, first_name=None) -> datetime:
-    """Тухайн user-ийн VIP хугацааг ОДООГООС эхлүүлж ШИНЭЭР тогтооно
-    (хуучин дуусах хугацааг үл тооцно). Буруу оруулсан хугацааг засахад ашиглана."""
+    """Ð¢ÑƒÑ…Ð°Ð¹Ð½ user-Ð¸Ð¹Ð½ VIP Ñ…ÑƒÐ³Ð°Ñ†Ð°Ð°Ð³ ÐžÐ”ÐžÐžÐ“ÐžÐžÐ¡ ÑÑ…Ð»Ò¯Ò¯Ð»Ð¶ Ð¨Ð˜ÐÐ­Ð­Ð  Ñ‚Ð¾Ð³Ñ‚Ð¾Ð¾Ð½Ð¾
+    (Ñ…ÑƒÑƒÑ‡Ð¸Ð½ Ð´ÑƒÑƒÑÐ°Ñ… Ñ…ÑƒÐ³Ð°Ñ†Ð°Ð°Ð³ Ò¯Ð» Ñ‚Ð¾Ð¾Ñ†Ð½Ð¾). Ð‘ÑƒÑ€ÑƒÑƒ Ð¾Ñ€ÑƒÑƒÐ»ÑÐ°Ð½ Ñ…ÑƒÐ³Ð°Ñ†Ð°Ð°Ð³ Ð·Ð°ÑÐ°Ñ…Ð°Ð´ Ð°ÑˆÐ¸Ð³Ð»Ð°Ð½Ð°."""
     ensure_user(user_id, username, first_name)
     conn = get_conn()
     c = conn.cursor()
@@ -270,7 +261,7 @@ def extend_vip(user_id: int, chat_id: int, duration: timedelta) -> Optional[date
 
 
 def remove_vip(user_id: int, chat_id: int) -> bool:
-    """Тухайн user-ийг зөвхөн тухайн chat_id-ийн VIP-аас хасна (бусад channel-д хэвээр)."""
+    """Ð¢ÑƒÑ…Ð°Ð¹Ð½ user-Ð¸Ð¹Ð³ Ð·Ó©Ð²Ñ…Ó©Ð½ Ñ‚ÑƒÑ…Ð°Ð¹Ð½ chat_id-Ð¸Ð¹Ð½ VIP-Ð°Ð°Ñ Ñ…Ð°ÑÐ½Ð° (Ð±ÑƒÑÐ°Ð´ channel-Ð´ Ñ…ÑÐ²ÑÑÑ€)."""
     conn = get_conn()
     c = conn.cursor()
     c.execute('SELECT user_id FROM vip_memberships WHERE user_id=? AND chat_id=?',
@@ -285,7 +276,7 @@ def remove_vip(user_id: int, chat_id: int) -> bool:
 
 
 def remove_vip_all(user_id: int) -> List[int]:
-    """Хэрэглэгчийг БҮХ channel-аас хасна. Хасагдсан chat_id-уудыг буцаана."""
+    """Ð¥ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡Ð¸Ð¹Ð³ Ð‘Ò®Ð¥ channel-Ð°Ð°Ñ Ñ…Ð°ÑÐ½Ð°. Ð¥Ð°ÑÐ°Ð³Ð´ÑÐ°Ð½ chat_id-ÑƒÑƒÐ´Ñ‹Ð³ Ð±ÑƒÑ†Ð°Ð°Ð½Ð°."""
     conn = get_conn()
     c = conn.cursor()
     c.execute('SELECT chat_id FROM vip_memberships WHERE user_id=?', (user_id,))
@@ -297,7 +288,7 @@ def remove_vip_all(user_id: int) -> List[int]:
 
 
 def get_vip_memberships(user_id: int) -> List[Dict]:
-    """Тухайн хэрэглэгчийн бүх идэвхтэй VIP бичлэгүүд."""
+    """Ð¢ÑƒÑ…Ð°Ð¹Ð½ Ñ…ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡Ð¸Ð¹Ð½ Ð±Ò¯Ñ… Ð¸Ð´ÑÐ²Ñ…Ñ‚ÑÐ¹ VIP Ð±Ð¸Ñ‡Ð»ÑÐ³Ò¯Ò¯Ð´."""
     conn = get_conn()
     c = conn.cursor()
     c.execute('SELECT * FROM vip_memberships WHERE user_id=? ORDER BY vip_expiry ASC', (user_id,))
@@ -307,7 +298,7 @@ def get_vip_memberships(user_id: int) -> List[Dict]:
 
 
 def get_all_vips() -> List[Dict]:
-    """Бүх идэвхтэй VIP бичлэгүүд (бүх хэрэглэгч, бүх channel) хэрэглэгчийн нэртэй хамт."""
+    """Ð‘Ò¯Ñ… Ð¸Ð´ÑÐ²Ñ…Ñ‚ÑÐ¹ VIP Ð±Ð¸Ñ‡Ð»ÑÐ³Ò¯Ò¯Ð´ (Ð±Ò¯Ñ… Ñ…ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡, Ð±Ò¯Ñ… channel) Ñ…ÑÑ€ÑÐ³Ð»ÑÐ³Ñ‡Ð¸Ð¹Ð½ Ð½ÑÑ€Ñ‚ÑÐ¹ Ñ…Ð°Ð¼Ñ‚."""
     conn = get_conn()
     c = conn.cursor()
     c.execute('''
@@ -361,7 +352,7 @@ def get_expiring_soon(days: int) -> List[Dict]:
 
 
 def get_expired_vips() -> List[Dict]:
-    """Хугацаа дууссан бичлэгүүд (бүх channel дотроос)."""
+    """Ð¥ÑƒÐ³Ð°Ñ†Ð°Ð° Ð´ÑƒÑƒÑÑÐ°Ð½ Ð±Ð¸Ñ‡Ð»ÑÐ³Ò¯Ò¯Ð´ (Ð±Ò¯Ñ… channel Ð´Ð¾Ñ‚Ñ€Ð¾Ð¾Ñ)."""
     conn = get_conn()
     c = conn.cursor()
     now = now_mn().isoformat()
@@ -382,7 +373,7 @@ def get_auto_reply() -> str:
     c.execute("SELECT value FROM settings WHERE key='auto_reply'")
     row = c.fetchone()
     conn.close()
-    return row['value'] if row else "🎬 VIP группт элсэхийг хүсвэл бидэнтэй холбогдоно уу."
+    return row['value'] if row else "ðŸŽ¬ VIP Ð³Ñ€ÑƒÐ¿Ð¿Ñ‚ ÑÐ»ÑÑÑ…Ð¸Ð¹Ð³ Ñ…Ò¯ÑÐ²ÑÐ» Ð±Ð¸Ð´ÑÐ½Ñ‚ÑÐ¹ Ñ…Ð¾Ð»Ð±Ð¾Ð³Ð´Ð¾Ð½Ð¾ ÑƒÑƒ."
 
 
 def set_auto_reply(text: str):
@@ -391,77 +382,3 @@ def set_auto_reply(text: str):
     c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('auto_reply', ?)", (text,))
     conn.commit()
     conn.close()
-
-
-# ─── КИНО ТОО (channel тус бүрээр) ─────────────────────────────────
-
-def increment_movie_count(chat_id: int, chat_title: str = "", by: int = 1) -> int:
-    """Сувагт шинэ кино (channel_post) ирэхэд дуудагдана. Шинэ тоог буцаана."""
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute('SELECT count, chat_title FROM movie_counts WHERE chat_id=?', (chat_id,))
-    row = c.fetchone()
-    if row:
-        new_count = row['count'] + by
-        title_to_save = chat_title or row['chat_title']
-        c.execute('UPDATE movie_counts SET count=?, chat_title=? WHERE chat_id=?',
-                  (new_count, title_to_save, chat_id))
-    else:
-        new_count = by
-        c.execute('INSERT INTO movie_counts (chat_id, chat_title, count) VALUES (?, ?, ?)',
-                  (chat_id, chat_title, new_count))
-    conn.commit()
-    conn.close()
-    return new_count
-
-
-def set_movie_count(chat_id: int, count: int, chat_title: Optional[str] = None):
-    """Админ гараар тоог засварлахад ашиглана (жишээ нь давхардал засах)."""
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute('SELECT chat_title FROM movie_counts WHERE chat_id=?', (chat_id,))
-    row = c.fetchone()
-    title_to_save = chat_title if chat_title is not None else (row['chat_title'] if row else "")
-    c.execute('''
-        INSERT INTO movie_counts (chat_id, chat_title, count) VALUES (?, ?, ?)
-        ON CONFLICT(chat_id) DO UPDATE SET count=excluded.count, chat_title=excluded.chat_title
-    ''', (chat_id, title_to_save, count))
-    conn.commit()
-    conn.close()
-
-
-def get_movie_counts() -> List[Dict]:
-    """Бүх сувгийн кино тоог буцаана."""
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute('SELECT * FROM movie_counts ORDER BY chat_title')
-    rows = c.fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-_TITLE_STOPWORDS = {'vip', 'кино', 'movie', 'zone', 'movizone', 'moviezone'}
-_WORD_RE = re.compile(r'[a-zA-Zа-яА-ЯёЁүҮөӨ0-9]+', re.UNICODE)
-
-
-def _keywords(text: str) -> List[str]:
-    return [w for w in _WORD_RE.findall(text.lower()) if w and w not in _TITLE_STOPWORDS]
-
-
-def find_movie_count_by_text(text: str) -> Optional[Dict]:
-    """Хэрэглэгчийн бичсэн чөлөөт текст доторх суваг/категорийн нэрийг олж,
-    хамгийн олон түлхүүр үг таарсан мөрийг буцаана. 'VIP', 'кино' зэрэг
-    ерөнхий нэрийг тооцохгүй, ялгаатай үгсийг (жишээ: 'хүүхдийн', 'монгол') харна."""
-    text_words = set(_WORD_RE.findall(text.lower()))
-    best = None
-    best_score = 0
-    for ch in get_movie_counts():
-        title_keywords = _keywords(ch['chat_title'] or '')
-        if not title_keywords:
-            continue
-        if all(kw in text_words for kw in title_keywords):
-            score = len(title_keywords)
-            if score > best_score:
-                best_score = score
-                best = ch
-    return best
