@@ -109,6 +109,15 @@ def init_db():
         VALUES ('auto_reply', '🎬 VIP кино группт элсэх бол төлбөрөө төлөөд хүлээнэ үү.\n\nАсуух зүйл байвал энэ бот руу бичнэ үү, бид удахгүй хариулна.')
     ''')
 
+    # Суваг тус бүрийн кино тоо (channel_post ирэх бүрт автоматаар нэмэгдэнэ)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS movie_counts (
+            chat_id    INTEGER PRIMARY KEY,
+            chat_title TEXT,
+            count      INTEGER DEFAULT 0
+        )
+    ''')
+
     conn.commit()
     conn.close()
     logger.info("Database initialized")
@@ -382,3 +391,77 @@ def set_auto_reply(text: str):
     c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('auto_reply', ?)", (text,))
     conn.commit()
     conn.close()
+
+
+# ─── КИНО ТОО (channel тус бүрээр) ─────────────────────────────────
+
+def increment_movie_count(chat_id: int, chat_title: str = "", by: int = 1) -> int:
+    """Сувагт шинэ кино (channel_post) ирэхэд дуудагдана. Шинэ тоог буцаана."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT count, chat_title FROM movie_counts WHERE chat_id=?', (chat_id,))
+    row = c.fetchone()
+    if row:
+        new_count = row['count'] + by
+        title_to_save = chat_title or row['chat_title']
+        c.execute('UPDATE movie_counts SET count=?, chat_title=? WHERE chat_id=?',
+                  (new_count, title_to_save, chat_id))
+    else:
+        new_count = by
+        c.execute('INSERT INTO movie_counts (chat_id, chat_title, count) VALUES (?, ?, ?)',
+                  (chat_id, chat_title, new_count))
+    conn.commit()
+    conn.close()
+    return new_count
+
+
+def set_movie_count(chat_id: int, count: int, chat_title: Optional[str] = None):
+    """Админ гараар тоог засварлахад ашиглана (жишээ нь давхардал засах)."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT chat_title FROM movie_counts WHERE chat_id=?', (chat_id,))
+    row = c.fetchone()
+    title_to_save = chat_title if chat_title is not None else (row['chat_title'] if row else "")
+    c.execute('''
+        INSERT INTO movie_counts (chat_id, chat_title, count) VALUES (?, ?, ?)
+        ON CONFLICT(chat_id) DO UPDATE SET count=excluded.count, chat_title=excluded.chat_title
+    ''', (chat_id, title_to_save, count))
+    conn.commit()
+    conn.close()
+
+
+def get_movie_counts() -> List[Dict]:
+    """Бүх сувгийн кино тоог буцаана."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT * FROM movie_counts ORDER BY chat_title')
+    rows = c.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+_TITLE_STOPWORDS = {'vip', 'кино', 'movie', 'zone', 'movizone', 'moviezone'}
+_WORD_RE = re.compile(r'[a-zA-Zа-яА-ЯёЁүҮөӨ0-9]+', re.UNICODE)
+
+
+def _keywords(text: str) -> List[str]:
+    return [w for w in _WORD_RE.findall(text.lower()) if w and w not in _TITLE_STOPWORDS]
+
+
+def find_movie_count_by_text(text: str) -> Optional[Dict]:
+    """Хэрэглэгчийн бичсэн чөлөөт текст доторх суваг/категорийн нэрийг олж,
+    хамгийн олон түлхүүр үг таарсан мөрийг буцаана. 'VIP', 'кино' зэрэг
+    ерөнхий нэрийг тооцохгүй, ялгаатай үгсийг (жишээ: 'хүүхдийн', 'монгол') харна."""
+    text_words = set(_WORD_RE.findall(text.lower()))
+    best = None
+    best_score = 0
+    for ch in get_movie_counts():
+        title_keywords = _keywords(ch['chat_title'] or '')
+        if not title_keywords:
+            continue
+        if all(kw in text_words for kw in title_keywords):
+            score = len(title_keywords)
+            if score > best_score:
+                best_score = score
+                best = ch
+    return best
