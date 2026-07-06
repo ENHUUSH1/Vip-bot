@@ -516,15 +516,21 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def set_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
-    if not context.args:
+    message = update.message
+    raw_text = message.text or ""
+    # context.args ашиглавал бүх мөр таслалт (newline) зайгаар солигдож,
+    # хэрэглэгчийн бичсэн форматыг гээдэг тул raw текстээс шууд авна.
+    # Зөвхөн ЭХНИЙ зай/мөр таслалтаар л таслаж, үлдсэнийг бүхэлд нь хэвээр үлдээнэ.
+    parts = raw_text.split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
         current = db.get_auto_reply()
-        await update.message.reply_text(
+        await message.reply_text(
             f"Одоогийн автомат хариулт:\n{current}\n\nӨөрчлөхдөө:\n/setreply [шинэ текст]"
         )
         return
-    new_text = ' '.join(context.args)
+    new_text = parts[1]
     db.set_auto_reply(new_text)
-    await update.message.reply_text(f"✅ Автомат хариулт шинэчлэгдлээ:\n{new_text}")
+    await message.reply_text(f"✅ Автомат хариулт шинэчлэгдлээ:\n{new_text}")
 
 
 async def view_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -601,10 +607,26 @@ def main():
     db.init_db()
     app = Application.builder().token(config.BOT_TOKEN).build()
 
+    # 1) Энгийн хэрэглэгчид зориулсан командууд
     app.add_handler(CommandHandler('start', start))
 
-    # Админы мессеж — командуудын дараа бүртгэгдэх ёстой, гэхдээ
-    # filters-аар л админыг ялгадаг тул дараалал хамаагүй; group=1-ээр доош тавья
+    # 2) VIP гишүүнчлэлийн удирдлагын командууд (админ)
+    app.add_handler(CommandHandler('addvip', cmd_add_vip))
+    app.add_handler(CommandHandler('extendvip', cmd_extend_vip))
+    app.add_handler(CommandHandler('removevip', cmd_remove_vip))
+    app.add_handler(CommandHandler('viplist', cmd_vip_list))
+    app.add_handler(CommandHandler('vipinfo', cmd_vip_info))
+
+    # 3) Автомат хариултын тохиргоо (админ)
+    app.add_handler(CommandHandler('setreply', set_reply))
+    app.add_handler(CommandHandler('viewreply', view_reply))
+
+    # 4) Ерөнхий статистик (админ)
+    app.add_handler(CommandHandler('stats', cmd_stats))
+
+    # 5) Чөлөөт мессежийн handler-ууд (командын дараа, group=1)
+    #    - Админ бичихэд: VIP хугацаа асуулт, /r, reply, сүүлд бичсэн хэрэглэгчид хариулах
+    #    - Энгийн хэрэглэгч бичихэд: админд дамжуулах + автомат хариулт
     app.add_handler(
         MessageHandler(
             filters.ChatType.PRIVATE & filters.User(config.ADMIN_IDS) & filters.TEXT,
@@ -612,25 +634,17 @@ def main():
         ),
         group=1
     )
-
-    app.add_handler(CommandHandler('addvip', cmd_add_vip))
-    app.add_handler(CommandHandler('extendvip', cmd_extend_vip))
-    app.add_handler(CommandHandler('removevip', cmd_remove_vip))
-    app.add_handler(CommandHandler('viplist', cmd_vip_list))
-    app.add_handler(CommandHandler('vipinfo', cmd_vip_info))
-    app.add_handler(CommandHandler('stats', cmd_stats))
-    app.add_handler(CommandHandler('setreply', set_reply))
-    app.add_handler(CommandHandler('viewreply', view_reply))
-
     app.add_handler(
         MessageHandler(~filters.COMMAND & filters.ChatType.PRIVATE, handle_user_message),
         group=1
     )
 
+    # 6) Групп/суваг дахь гишүүнчлэлийн event-үүд
     app.add_handler(ChatMemberHandler(handle_chat_member, ChatMemberHandler.CHAT_MEMBER))
     app.add_handler(ChatMemberHandler(handle_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     app.add_handler(ChatJoinRequestHandler(handle_join_request_approved))
 
+    # 7) Автомат шалгалтууд (сануулга, хугацаа дуусах)
     scheduler = AsyncIOScheduler(timezone=db.MN_TZ)
     scheduler.add_job(
         check_expired_vips,
