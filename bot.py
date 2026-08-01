@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from telegram import Update
+from telegram.constants import ParseMode
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters,
     ContextTypes, ChatMemberHandler, ChatJoinRequestHandler
@@ -43,7 +44,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.bot_data['last_user'] = user.id
 
     welcome = db.get_auto_reply()
-    await update.message.reply_text(welcome)
+    try:
+        await update.message.reply_text(welcome, parse_mode=ParseMode.HTML)
+    except TelegramError as e:
+        # HTML parse алдаа гарвал (жишээ нь хадгалсан текст эвдэрсэн бол)
+        # энгийн текстээр дор хаяж илгээгээд өнгөрнө.
+        logger.error(f"Welcome HTML алдаа: {e}")
+        await update.message.reply_text(welcome)
 
     # Шинэ хэрэглэгчийн талаар админд мэдэгдэнэ
     await forward_to_admins(context, user, header_extra="\n[/start дарсан]")
@@ -68,9 +75,13 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if should_greet:
         welcome = db.get_auto_reply()
         try:
-            await message.reply_text(welcome)
+            await message.reply_text(welcome, parse_mode=ParseMode.HTML)
         except TelegramError as e:
-            logger.error(f"Welcome алдаа: {e}")
+            logger.error(f"Welcome HTML алдаа: {e}")
+            try:
+                await message.reply_text(welcome)
+            except TelegramError as e2:
+                logger.error(f"Welcome алдаа: {e2}")
 
     context.bot_data['last_user'] = user.id
 
@@ -518,6 +529,7 @@ async def set_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     message = update.message
     raw_text = message.text or ""
+    raw_html = message.text_html or ""
     # context.args ашиглавал бүх мөр таслалт (newline) зайгаар солигдож,
     # хэрэглэгчийн бичсэн форматыг гээдэг тул raw текстээс шууд авна.
     # Зөвхөн ЭХНИЙ зай/мөр таслалтаар л таслаж, үлдсэнийг бүхэлд нь хэвээр үлдээнэ.
@@ -525,19 +537,31 @@ async def set_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(parts) < 2 or not parts[1].strip():
         current = db.get_auto_reply()
         await message.reply_text(
-            f"Одоогийн автомат хариулт:\n{current}\n\nӨөрчлөхдөө:\n/setreply [шинэ текст]"
+            f"Одоогийн автомат хариулт:\n{current}\n\nӨөрчлөхдөө:\n/setreply [шинэ текст]",
+            parse_mode=ParseMode.HTML,
         )
         return
-    new_text = parts[1]
-    db.set_auto_reply(new_text)
-    await message.reply_text(f"✅ Автомат хариулт шинэчлэгдлээ:\n{new_text}")
+
+    # /setreply-ийн дараах бодит текстийг HTML хэлбэрээр авна.
+    # "/setreply " (команд + эхний зай) яг pure ASCII тул урт нь
+    # Python str индекс болон Telegram-ийн UTF-16 offset дээр адилхан
+    # тохирдог — тиймээс HTML tag-уудыг (animated/custom emoji зэргийг)
+    # алдалгүй яг зөв тасалж чадна.
+    prefix_len = len(raw_text) - len(parts[1])
+    new_html = raw_html[prefix_len:]
+
+    db.set_auto_reply(new_html)
+    await message.reply_text(
+        f"✅ Автомат хариулт шинэчлэгдлээ:\n{new_html}",
+        parse_mode=ParseMode.HTML,
+    )
 
 
 async def view_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
     current = db.get_auto_reply()
-    await update.message.reply_text(f"Автомат хариулт:\n{current}")
+    await update.message.reply_text(f"Автомат хариулт:\n{current}", parse_mode=ParseMode.HTML)
 
 
 # ─── SCHEDULER ────────────────────────────────────────────────────
