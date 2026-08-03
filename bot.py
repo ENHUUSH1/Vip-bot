@@ -191,6 +191,15 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await message.reply_text("✅ Дууслаа. Хугацаа засах горим хаагдлаа.")
         return
 
+    # ── "delete" гэсэн үг (slash-гүй) — сүүлд илгээсэн хариуг устгах ──
+    # Санамсаргүй байдлаар энэ үгийг хэрэглэгч рүү шууд илгээхээс сэргийлж,
+    # энд тусгайлан барьж аваад cmd_delete-тэй ижил үйлдэл хийнэ.
+    # (Slash-тай "/delete"-ийг тусдаа CommandHandler аль хэдийн барьдаг тул
+    # энд дахин барихгүй — давхар ажиллахаас сэргийлнэ.)
+    if text.strip().lower() == 'delete':
+        await cmd_delete(update, context)
+        return
+
     # ── /r ID текст ──
     if text.startswith('/r '):
         parts = text.split(' ', 2)
@@ -200,7 +209,8 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 reply_text = parts[2]
                 sent = await context.bot.send_message(chat_id=target_id, text=reply_text)
                 context.bot_data['last_sent'] = {'chat_id': target_id, 'message_id': sent.message_id}
-                await message.reply_text(f"✅ {target_id}-д илгээгдлээ. (Устгах бол /delete)")
+                db.save_sent_map(message.message_id, user.id, target_id, sent.message_id)
+                await message.reply_text(f"✅ {target_id}-д илгээгдлээ. (Устгах бол энэ мессежээ reply хийгээд /delete)")
             except Exception as e:
                 await message.reply_text(f"❌ Алдаа: {e}")
         else:
@@ -218,6 +228,7 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
             try:
                 sent = await context.bot.send_message(chat_id=target_id, text=text)
                 context.bot_data['last_sent'] = {'chat_id': target_id, 'message_id': sent.message_id}
+                db.save_sent_map(message.message_id, user.id, target_id, sent.message_id)
             except TelegramError as e:
                 await message.reply_text(f"❌ Алдаа: {e}")
             return
@@ -231,17 +242,46 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
     try:
         sent = await context.bot.send_message(chat_id=last_user, text=text)
         context.bot_data['last_sent'] = {'chat_id': last_user, 'message_id': sent.message_id}
+        db.save_sent_map(message.message_id, user.id, last_user, sent.message_id)
     except TelegramError as e:
         await message.reply_text(f"❌ Алдаа: {e}")
 
 
-# ─── СҮҮЛД ИЛГЭЭСЭН ХАРИУГ УСТГАХ ────────────────────────────────
+# ─── ИЛГЭЭСЭН ХАРИУГ УСТГАХ ──────────────────────────────────────
 async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
+    admin_id = update.effective_user.id
+    message = update.message
+
+    # 1) Хэрэв админ ТОДОРХОЙ мессежээ reply хийгээд /delete бичсэн бол —
+    #    яг тэр мессежийг л олж устгана.
+    if message.reply_to_message:
+        target = db.get_sent_map(message.reply_to_message.message_id, admin_id)
+        if target:
+            try:
+                await context.bot.delete_message(
+                    chat_id=target['target_chat_id'],
+                    message_id=target['sent_message_id']
+                )
+                await message.reply_text("🗑 Тухайн мессеж хэрэглэгчийн талд устгагдлаа.")
+            except TelegramError as e:
+                await message.reply_text(
+                    f"❌ Устгаж чадсангүй: {e}\n"
+                    f"(Telegram 48 цагаас хойш илгээсэн мессежийг устгуулахгүй байж болно.)"
+                )
+            return
+        else:
+            await message.reply_text(
+                "❌ Энэ мессеж хэрэглэгчид илгээсэн хариу гэдгийг олж чадсангүй.\n"
+                "(Зөвхөн ТАНЫ илгээсэн текст мессежийг reply хийж чадна.)"
+            )
+            return
+
+    # 2) Reply хийгээгүй бол — хамгийн сүүлд илгээсэн мессежийг устгана.
     last_sent = context.bot_data.get('last_sent')
     if not last_sent:
-        await update.message.reply_text("❌ Устгах мессеж алга (сүүлд юу ч илгээгээгүй байна).")
+        await message.reply_text("❌ Устгах мессеж алга (сүүлд юу ч илгээгээгүй байна).")
         return
     try:
         await context.bot.delete_message(
@@ -249,9 +289,9 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message_id=last_sent['message_id']
         )
         context.bot_data.pop('last_sent', None)
-        await update.message.reply_text("🗑 Хэрэглэгчийн талд байгаа мессеж устгагдлаа.")
+        await message.reply_text("🗑 Хэрэглэгчийн талд байгаа мессеж устгагдлаа.")
     except TelegramError as e:
-        await update.message.reply_text(
+        await message.reply_text(
             f"❌ Устгаж чадсангүй: {e}\n"
             f"(Telegram 48 цагаас хойш илгээсэн мессежийг устгуулахгүй байж болно.)"
         )
@@ -725,4 +765,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
