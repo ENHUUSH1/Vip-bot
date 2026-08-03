@@ -198,8 +198,9 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
             try:
                 target_id = int(parts[1])
                 reply_text = parts[2]
-                await context.bot.send_message(chat_id=target_id, text=reply_text)
-                await message.reply_text(f"✅ {target_id}-д илгээгдлээ.")
+                sent = await context.bot.send_message(chat_id=target_id, text=reply_text)
+                context.bot_data['last_sent'] = {'chat_id': target_id, 'message_id': sent.message_id}
+                await message.reply_text(f"✅ {target_id}-д илгээгдлээ. (Устгах бол /delete)")
             except Exception as e:
                 await message.reply_text(f"❌ Алдаа: {e}")
         else:
@@ -215,7 +216,8 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
         target_id = db.get_user_from_message(replied_msg_id, user.id)
         if target_id:
             try:
-                await context.bot.send_message(chat_id=target_id, text=text)
+                sent = await context.bot.send_message(chat_id=target_id, text=text)
+                context.bot_data['last_sent'] = {'chat_id': target_id, 'message_id': sent.message_id}
             except TelegramError as e:
                 await message.reply_text(f"❌ Алдаа: {e}")
             return
@@ -227,9 +229,32 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     try:
-        await context.bot.send_message(chat_id=last_user, text=text)
+        sent = await context.bot.send_message(chat_id=last_user, text=text)
+        context.bot_data['last_sent'] = {'chat_id': last_user, 'message_id': sent.message_id}
     except TelegramError as e:
         await message.reply_text(f"❌ Алдаа: {e}")
+
+
+# ─── СҮҮЛД ИЛГЭЭСЭН ХАРИУГ УСТГАХ ────────────────────────────────
+async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return
+    last_sent = context.bot_data.get('last_sent')
+    if not last_sent:
+        await update.message.reply_text("❌ Устгах мессеж алга (сүүлд юу ч илгээгээгүй байна).")
+        return
+    try:
+        await context.bot.delete_message(
+            chat_id=last_sent['chat_id'],
+            message_id=last_sent['message_id']
+        )
+        context.bot_data.pop('last_sent', None)
+        await update.message.reply_text("🗑 Хэрэглэгчийн талд байгаа мессеж устгагдлаа.")
+    except TelegramError as e:
+        await update.message.reply_text(
+            f"❌ Устгаж чадсангүй: {e}\n"
+            f"(Telegram 48 цагаас хойш илгээсэн мессежийг устгуулахгүй байж болно.)"
+        )
 
 
 # ─── VIP ГРУППТ ШИНЭ ГИШҮҮН (group-д л ажиллана) ──────────────────
@@ -648,6 +673,9 @@ def main():
     # 4) Ерөнхий статистик (админ)
     app.add_handler(CommandHandler('stats', cmd_stats))
 
+    # 4.1) Сүүлд илгээсэн хариуг устгах (админ)
+    app.add_handler(CommandHandler('delete', cmd_delete))
+
     # 5) Чөлөөт мессежийн handler-ууд (командын дараа, group=1)
     #    - Админ бичихэд: VIP хугацаа асуулт, /r, reply, сүүлд бичсэн хэрэглэгчид хариулах
     #    - Энгийн хэрэглэгч бичихэд: админд дамжуулах + автомат хариулт
@@ -697,3 +725,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
