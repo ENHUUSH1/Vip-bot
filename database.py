@@ -105,6 +105,17 @@ def init_db():
     ''')
 
     c.execute('''
+        CREATE TABLE IF NOT EXISTS sent_map (
+            admin_message_id INTEGER,
+            admin_id         INTEGER,
+            target_chat_id   INTEGER,
+            sent_message_id  INTEGER,
+            created_at       TEXT,
+            PRIMARY KEY (admin_message_id, admin_id)
+        )
+    ''')
+
+    c.execute('''
         INSERT OR IGNORE INTO settings (key, value)
         VALUES ('auto_reply', '🎬 VIP кино группт элсэх бол төлбөрөө төлөөд хүлээнэ үү.\n\nАсуух зүйл байвал энэ бот руу бичнэ үү, бид удахгүй хариулна.')
     ''')
@@ -173,6 +184,30 @@ def get_user_from_message(message_id: int, admin_id: int) -> Optional[int]:
     row = c.fetchone()
     conn.close()
     return row['user_id'] if row else None
+
+
+def save_sent_map(admin_message_id: int, admin_id: int, target_chat_id: int, sent_message_id: int):
+    """Админ илгээсэн (өөрийн бичсэн) мессежийг, тэрхүү текстээр хэрэглэгч рүү
+    илгээгдсэн бодит мессежтэй холбож хадгална — дараа нь /delete-ээр яг
+    ТУХАЙН мессежийг олж устгахад ашиглана."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('''
+        INSERT OR REPLACE INTO sent_map (admin_message_id, admin_id, target_chat_id, sent_message_id, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (admin_message_id, admin_id, target_chat_id, sent_message_id, now_mn().isoformat()))
+    conn.commit()
+    conn.close()
+
+
+def get_sent_map(admin_message_id: int, admin_id: int) -> Optional[dict]:
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('SELECT target_chat_id, sent_message_id FROM sent_map WHERE admin_message_id=? AND admin_id=?',
+              (admin_message_id, admin_id))
+    row = c.fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 # ─── VIP MEMBERSHIPS (channel тус бүрээр тусдаа) ──────────────────
